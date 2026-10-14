@@ -1,0 +1,42 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "solidworks-mcp"
+dynamic = ["version"]
+description = "MCP server that lets an AI assistant drive SolidWorks through its COM API"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Matteo Baisini" }]
+requires-python = ">=3.11"
+keywords = ["mcp", "solidworks", "cad", "model-context-protocol"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering",
+]
+dependencies = [
+    "mcp>=1.13,<2",
+    "pywin32>=306; sys_platform == 'win32'",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+solidworks-mcp = "solidworks_mcp.server:main"
+
+[project.urls]
+Repository = "https://github.com/MatteoBaisini/solidworks-mcp"
+
+[tool.hatch.version]
+path = "src/solidworks_mcp/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/solidworks_mcp"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

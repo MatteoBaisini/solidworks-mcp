@@ -1,0 +1,33 @@
+# SolidWorks MCP server - example configuration.
+#
+# Copy this file and point the server at it with --config <path> or the
+# SOLIDWORKS_MCP_CONFIG environment variable. Without either, the server looks for
+# solidworks-mcp.toml in its working directory, then for
+# %APPDATA%\solidworks-mcp\config.toml. Every key is optional; the values below
+# are the defaults.
+
+[solidworks]
+# Start SolidWorks when it is not running, instead of returning an error.
+auto_launch = true
+# Full path to SLDWORKS.exe. Leave empty to find it through the Windows registry.
+executable = ""
+# Seconds to wait for SolidWorks to finish starting.
+startup_timeout_s = 180
+# Seconds a single command may take before it is reported as stuck. While a
+# command is stuck, new commands are refused instead of being queued.
+command_timeout_s = 90
+
+[export]
+# Formats written by export_document when the assistant does not ask for specific
+# ones. Supported: step, stp, iges, igs, x_t, stl, 3mf, pdf, png.
+formats = ["step"]
+# Where exported files go: absolute, or relative to the folder of the document.
+# "{format}" is replaced by the format name, e.g. "../{format}" puts STEP files in
+# a "step" folder next to the folder that holds the part.
+directory = "."
+
+[macro]
+# Expose execute_solidworks_macro, which lets the assistant run arbitrary Python
+# code on this PC with your privileges. Leave it off unless you trust the
+# assistant and the prompts it receives.
+enabled = false
