@@ -94,6 +94,15 @@ Rules:
 - export_document writes the exchange formats configured by the user (STEP by default).
 """
 
+PROJECTS_INSTRUCTIONS = """\
+- The user keeps every part in the projects folder: {root}
+  Save each part as <project>/cad/<project>_v<N>_<description>.SLDPRT (lowercase, underscores),
+  e.g. save_document("bracket/cad/bracket_v1_base.SLDPRT"): a relative path is relative to the
+  projects folder and missing folders are created. A new version of a part gets the next number
+  instead of overwriting the previous file. Keep a short README.md in the project folder with
+  the main dimensions and the list of versions.
+"""
+
 mcp = FastMCP("SolidWorks", instructions=SERVER_INSTRUCTIONS, host=HOST, port=DEFAULT_PORT)
 
 # --------------------------------------------------------------------------- #
@@ -320,6 +329,25 @@ def close_sketch_and_select_it(doc: Any) -> str:
     return call(sketch, "Name")
 
 
+def resolve_save_path(path: str) -> str:
+    """Full path for a save: relative paths go under the projects folder, where missing
+    folders are created; anywhere else the folder must already exist."""
+    root = CONFIG.projects_directory
+    if not os.path.isabs(path):
+        if not root:
+            raise SWError("Give a full path: no projects folder is set in the configuration.")
+        path = os.path.join(root, path)
+    path = os.path.normpath(path)
+    folder = os.path.dirname(path)
+    if not os.path.isdir(folder):
+        inside = bool(root) and os.path.normcase(folder + os.sep).startswith(
+            os.path.normcase(os.path.normpath(root) + os.sep))
+        if not inside:
+            raise SWError(f"The folder {folder} does not exist.")
+        os.makedirs(folder)
+    return path
+
+
 def rebuild(doc: Any) -> None:
     try:
         doc.ForceRebuild3(False)
@@ -476,7 +504,8 @@ async def new_part() -> str:
 @mcp.tool()
 async def save_document(path: str = "") -> str:
     """Saves the active document. With 'path' (e.g. C:\\\\projects\\\\part.SLDPRT, .step, .stl, .pdf...)
-    saves/exports to that file: the format is taken from the extension."""
+    saves/exports to that file: the format is taken from the extension. When the user has set a
+    projects folder, a relative path is relative to it and missing folders inside it are created."""
     def work():
         doc = active_doc()
         if not path:
@@ -487,13 +516,11 @@ async def save_document(path: str = "") -> str:
             if not ok:
                 raise SWError("Save failed.")
             return "Document saved."
-        folder = os.path.dirname(path)
-        if folder and not os.path.isdir(folder):
-            raise SWError(f"The folder {folder} does not exist.")
-        err = doc.SaveAs3(path, 0, SW_SAVE_SILENT)
-        if err != 0 or not os.path.exists(path):
+        target = resolve_save_path(path)
+        err = doc.SaveAs3(target, 0, SW_SAVE_SILENT)
+        if err != 0 or not os.path.exists(target):
             raise SWError(f"Save failed (SolidWorks error code {err}).")
-        return f"Saved to {path}"
+        return f"Saved to {target}"
     return await com_tool(work)
 
 
@@ -878,6 +905,13 @@ def main(argv: list[str] | None = None) -> None:
     if CONFIG.allow_macro:
         register_macro_tool()
         logger.warning("execute_solidworks_macro is ENABLED: the assistant can run arbitrary Python code.")
+
+    if CONFIG.projects_directory:
+        os.makedirs(CONFIG.projects_directory, exist_ok=True)
+        # FastMCP takes the instructions only at construction, before the configuration is read
+        mcp._mcp_server.instructions = SERVER_INSTRUCTIONS + PROJECTS_INSTRUCTIONS.format(
+            root=CONFIG.projects_directory)
+        logger.info("Projects folder: %s", CONFIG.projects_directory)
 
     mcp.settings.port = args.port
     if args.transport == "stdio":

@@ -87,3 +87,14 @@ def test_invalid_files_are_rejected(tmp_path, text):
 def test_missing_explicit_file(tmp_path):
     with pytest.raises(ConfigError):
         load_config(tmp_path / "missing.toml")
+
+
+def test_projects_directory_is_relative_to_the_config_file(tmp_path, monkeypatch):
+    file = write(tmp_path / "conf" / "my.toml", '[projects]\ndirectory = "parts"\n')
+    monkeypatch.chdir(tmp_path)  # not the folder of the file
+    assert load_config(file).projects_directory == str((tmp_path / "conf" / "parts").resolve())
+
+    absolute = tmp_path / "elsewhere"
+    file = write(tmp_path / "conf" / "abs.toml", f"[projects]\ndirectory = '{absolute}'\n")
+    assert load_config(file).projects_directory == str(absolute.resolve())
+    assert load_config().projects_directory == ""

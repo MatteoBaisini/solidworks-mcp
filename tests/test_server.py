@@ -73,3 +73,31 @@ def test_stuck_command_times_out_and_later_ones_fail_fast(monkeypatch):
     assert refused.startswith("ERROR:") and "still busy" in refused
     assert refused_in < 0.1
     assert after == "ok"
+
+
+def test_save_paths_resolve_under_the_projects_folder(tmp_path, monkeypatch):
+    root = tmp_path / "projects"
+    root.mkdir()
+    monkeypatch.setattr(server.CONFIG, "projects_directory", str(root))
+
+    target = server.resolve_save_path("bracket/cad/bracket_v1_base.SLDPRT")
+    assert target == str(root / "bracket" / "cad" / "bracket_v1_base.SLDPRT")
+    assert (root / "bracket" / "cad").is_dir()          # created inside the projects folder
+
+    outside = tmp_path / "other" / "part.SLDPRT"
+    with pytest.raises(server.SWError):                  # never created outside it
+        server.resolve_save_path(str(outside))
+    assert not outside.parent.exists()
+    with pytest.raises(server.SWError):                  # escaping with .. is outside too
+        server.resolve_save_path("../escaped/part.SLDPRT")
+    assert not (tmp_path / "escaped").exists()
+
+    existing = tmp_path / "existing"
+    existing.mkdir()
+    assert server.resolve_save_path(str(existing / "part.step")) == str(existing / "part.step")
+
+
+def test_relative_save_path_needs_a_projects_folder(monkeypatch):
+    monkeypatch.setattr(server.CONFIG, "projects_directory", "")
+    with pytest.raises(server.SWError):
+        server.resolve_save_path("bracket/cad/part.SLDPRT")

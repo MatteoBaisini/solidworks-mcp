@@ -35,6 +35,7 @@ class Config:
     command_timeout_s: float = 90.0   # how long a single command may take
     export_formats: list[str] = field(default_factory=lambda: ["step"])
     export_directory: str = "."       # relative to the document folder; {format} is replaced
+    projects_directory: str = ""      # where the assistant saves parts; empty = not set
     allow_macro: bool = False         # expose execute_solidworks_macro (runs arbitrary code)
     source: str = "(defaults)"
 
@@ -50,6 +51,9 @@ _SCHEMA: dict[str, dict[str, tuple[str, type | tuple[type, ...]]]] = {
     "export": {
         "formats": ("export_formats", list),
         "directory": ("export_directory", str),
+    },
+    "projects": {
+        "directory": ("projects_directory", str),
     },
     "macro": {
         "enabled": ("allow_macro", bool),
@@ -109,6 +113,8 @@ def load_config(path: str | os.PathLike[str] | None = None) -> Config:
             raise ConfigError(f"{file}: invalid TOML: {e}") from e
         _apply(cfg, data, file)
         cfg.source = str(file)
+        if cfg.projects_directory:  # a relative folder is relative to the configuration file
+            cfg.projects_directory = str((file.parent / Path(cfg.projects_directory).expanduser()).resolve())
 
     cfg.export_formats = [normalize_format(f) for f in cfg.export_formats]
     if cfg.startup_timeout_s <= 0 or cfg.command_timeout_s <= 0:

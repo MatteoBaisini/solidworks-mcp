@@ -17,6 +17,12 @@ startup_timeout_s = 180
 # command is stuck, new commands are refused instead of being queued.
 command_timeout_s = 90
 
+[projects]
+# Folder where the assistant saves the parts it models, one sub-folder per project
+# (<project>/cad/<project>_v1_<description>.SLDPRT). Absolute, or relative to this
+# file. Leave empty to have the assistant ask for a full path on every save.
+directory = ""
+
 [export]
 # Formats written by export_document when the assistant does not ask for specific
 # ones. Supported: step, stp, iges, igs, x_t, stl, 3mf, pdf, png.

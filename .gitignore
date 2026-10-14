@@ -14,3 +14,7 @@ solidworks-mcp.toml
 # SolidWorks lock and backup files
 ~$*
 *.bak
+
+# Your own parts (only the folder's README is tracked)
+projects/*
+!projects/README.md

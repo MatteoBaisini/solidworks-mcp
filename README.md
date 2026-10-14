@@ -65,15 +65,20 @@ Settings live in a TOML file; every key is optional. Copy [`config.example.toml`
 3. `solidworks-mcp.toml` in the server's working directory
 4. `%APPDATA%\solidworks-mcp\config.toml`
 
-For example, to export STEP and STL into sibling folders of the one holding the part:
+For example, to keep every part in a projects folder and export STEP and STL next to the models:
 
 ```toml
+[projects]
+directory = "projects"       # relative to this file, or an absolute path
+
 [export]
 formats = ["step", "stl"]
 directory = "../{format}"
 ```
 
-`export_document` then writes `step/<part>.step` and `stl/<part>.stl` whenever the assistant is asked to export, without being told the formats each time.
+With a projects folder set, the assistant saves each part as `<project>/cad/<project>_v<N>_<description>.SLDPRT` inside it, creating the folders and numbering the versions, without being told where to save each time. `export_document` then writes `<project>/step/<part>.step` and `<project>/stl/<part>.stl`.
+
+A clone of this repository comes with a [`projects/`](projects/README.md) folder ready for this; its contents are ignored by git, so your parts are not published.
 
 ### Command line
 
