@@ -49,15 +49,29 @@ SolidWorks and the server must run with the same privileges: do not run either o
 
 | Group | Tools |
 |---|---|
-| Information | `get_active_document_info`, `get_feature_tree`, `get_bounding_box`, `get_mass_properties`, `get_screenshot` |
+| Information | `get_active_document_info`, `get_feature_tree`, `get_bounding_box`, `get_mass_properties`, `get_screenshot`, `measure` |
 | Documents | `new_part`, `save_document`, `export_document` |
-| Selection | `select_plane`, `select_face_at_point` |
-| Sketch | `start_sketch`, `end_sketch`, `sketch_line`, `sketch_rectangle`, `sketch_circle`, `sketch_arc`, `sketch_polygon` |
-| Features | `extrude`, `cut_extrude`, `revolve` |
+| Selection | `select_plane`, `select_face_at_point`, `select_edge_at_point` |
+| Sketch | `start_sketch`, `end_sketch`, `sketch_line`, `sketch_rectangle`, `sketch_circle`, `sketch_arc`, `sketch_polygon`, `sketch_slot`, `sketch_ellipse`, `sketch_spline`, `sketch_fillet`, `sketch_offset`, `convert_entities`, `convert_point` |
+| Sketch constraints | `fully_define_sketch`, `add_sketch_dimension`, `add_sketch_relation` |
+| Features | `extrude`, `cut_extrude`, `revolve`, `rib`, `sweep`, `loft`, `create_plane` |
+| Finishing | `fillet`, `chamfer`, `shell`, `hole` |
+| Patterns | `linear_pattern`, `circular_pattern`, `mirror` |
+| Material | `list_materials`, `set_material` |
+| Parameters | `get_dimensions`, `set_dimension`, `suppress_feature`, `get_equations`, `add_equation`, `delete_equation`, `get_custom_properties`, `set_custom_property` |
 | Editing | `undo`, `delete_feature`, `zoom_to_fit` |
 | Optional | `execute_solidworks_macro` (off by default, see [Security](#security)) |
 
-A typical part is `new_part` → `select_plane` → `start_sketch` → sketch tools → `extrude`, then `select_face_at_point` → `start_sketch` → `cut_extrude` for holes and pockets.
+A typical part is `new_part` → `select_plane` → `start_sketch` → sketch tools → `extrude`, then `select_face_at_point` → `start_sketch` → `cut_extrude` for pockets, `hole` for drilled holes, `fillet` / `chamfer` for the edges and `set_material` for a real mass.
+
+How the assistant points at things:
+
+- Sketch tools take sketch coordinates (x, y). `start_sketch` reports how the sketch axes map onto the model, and `convert_point` converts single points.
+- Faces, edges and vertices (fillet, chamfer, shell, hole, measure, ...) are picked by a point lying on them, in model coordinates [x, y, z]. The pick is geometric, so it also finds entities hidden in the current view.
+- Features and sketches are referred to by the names in the feature tree, which every tool that creates one returns.
+- Extrusions and cuts can go blind, midplane, through all or up to a face, in two directions, with draft, and as thin walls.
+- `hole` drills plain, counterbored or countersunk holes, sized by diameter or by metric screw size (ISO 273 clearance, tap drill, ISO 4762 / ISO 10642 counterbores and countersinks). Threads are not modelled.
+- Linear and circular patterns run along the model axes (a hidden reference axis is added the first time) or around an edge.
 
 ## Configuration
 
@@ -93,7 +107,7 @@ The default transport is `stdio`, which is what MCP clients expect when they sta
 
 ## Security
 
-`execute_solidworks_macro` lets the assistant run arbitrary Python code on your PC, with your privileges. It exists because the dedicated tools do not cover everything (fillets, chamfers, patterns, assemblies), but it is disabled unless you turn it on:
+`execute_solidworks_macro` lets the assistant run arbitrary Python code on your PC, with your privileges. It exists because the dedicated tools do not cover everything (assemblies, drawings, sheet metal, ...), but it is disabled unless you turn it on:
 
 ```toml
 [macro]

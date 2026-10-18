@@ -10,9 +10,14 @@ server = pytest.importorskip("solidworks_mcp.server", reason="needs Windows with
 EXPECTED_TOOLS = {
     "get_active_document_info", "get_mass_properties", "get_feature_tree", "get_bounding_box",
     "get_screenshot", "new_part", "save_document", "export_document", "select_plane",
-    "select_face_at_point", "start_sketch", "end_sketch", "sketch_rectangle", "sketch_circle",
-    "sketch_line", "sketch_polygon", "sketch_arc", "extrude", "cut_extrude", "revolve", "undo",
-    "delete_feature", "zoom_to_fit",
+    "select_face_at_point", "select_edge_at_point", "start_sketch", "end_sketch", "convert_point",
+    "sketch_rectangle", "sketch_circle", "sketch_line", "sketch_polygon", "sketch_arc", "sketch_slot",
+    "sketch_ellipse", "sketch_spline", "sketch_fillet", "sketch_offset", "convert_entities",
+    "fully_define_sketch", "add_sketch_dimension", "add_sketch_relation", "extrude", "cut_extrude",
+    "revolve", "rib", "sweep", "loft", "create_plane", "fillet", "chamfer", "shell", "linear_pattern",
+    "circular_pattern", "mirror", "hole", "list_materials", "set_material", "get_dimensions",
+    "set_dimension", "suppress_feature", "get_equations", "add_equation", "delete_equation",
+    "get_custom_properties", "set_custom_property", "measure", "undo", "delete_feature", "zoom_to_fit",
 }
 
 
@@ -101,3 +106,41 @@ def test_relative_save_path_needs_a_projects_folder(monkeypatch):
     monkeypatch.setattr(server.CONFIG, "projects_directory", "")
     with pytest.raises(server.SWError):
         server.resolve_save_path("bracket/cad/part.SLDPRT")
+
+
+def test_hole_sizes_come_from_the_metric_table():
+    assert server.hole_sizes("M6", "normal", 0, "simple", 0, 0, 0)[0] == 6.6
+    assert server.hole_sizes("m6", "tapped", 0, "simple", 0, 0, 0)[0] == 5.0
+    assert server.hole_sizes("M6", "close", 0, "counterbore", 0, 0, 0) == (6.4, 11.0, 6.4, 0)
+    assert server.hole_sizes("M6", "normal", 0, "countersink", 0, 0, 0)[3] == 13.0
+    assert server.hole_sizes("", "normal", 7, "counterbore", 12, 5, 0) == (7, 12, 5, 0)
+    assert server.hole_sizes("M6", "normal", 6.2, "simple", 0, 0, 0)[0] == 6.2   # explicit wins
+
+
+@pytest.mark.parametrize("args", [
+    ("M7", "normal", 0, "simple", 0, 0, 0),          # unknown size
+    ("", "normal", 0, "simple", 0, 0, 0),            # no size, no diameter
+    ("", "normal", 8, "counterbore", 6, 3, 0),       # counterbore smaller than the hole
+    ("", "normal", 8, "countersink", 0, 0, 0),       # countersink without a diameter
+])
+def test_hole_sizes_reject_bad_input(args):
+    with pytest.raises(server.SWError):
+        server.hole_sizes(*args)
+
+
+def test_extrusion_end_conditions_are_checked_before_touching_solidworks():
+    for args in ((0, "blind", 0), (10, "midplane", 5), (0, "up_to_surface", 0)):
+        with pytest.raises(server.SWError):
+            server.extrusion_ends(*args, None, doc=None)
+    assert server.extrusion_ends(10, "blind", 0, None, doc=None) == (True, 0, 0, 10 * server.MM, 0.0)
+    assert server.extrusion_ends(10, "blind", 4, None, doc=None) == (False, 0, 0, 10 * server.MM, 4 * server.MM)
+
+
+def test_sketch_coordinates_follow_the_sketch_transform(monkeypatch):
+    # Top plane as SolidWorks reports it (row vectors: sketch = model * R + T), moved up 10 mm:
+    # sketch X = model X, sketch Y = model -Z, sketch normal = model Y.
+    rows = [[1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, -1.0, 0.0]]
+    monkeypatch.setattr(server, "_sketch_transform", lambda doc: (rows, [0.0, 0.0, -0.01], 1.0))
+    assert server.model_to_sketch(None, [5, 10, -20]) == pytest.approx((5, 20, 0))
+    assert server.model_to_sketch(None, [5, 13, -20]) == pytest.approx((5, 20, 3))
+    assert server.sketch_to_model(None, 5, 20) == pytest.approx([5, 10, -20])
