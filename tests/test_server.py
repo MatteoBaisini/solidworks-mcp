@@ -27,6 +27,22 @@ def test_tools_are_registered_and_macro_is_off_by_default():
     assert "execute_solidworks_macro" not in names
 
 
+HINTS = ("readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint")
+
+
+def test_every_tool_declares_all_four_hints():
+    server.register_macro_tool()
+    try:
+        for tool in asyncio.run(server.mcp.list_tools()):
+            assert tool.annotations is not None, tool.name
+            for hint in HINTS:
+                assert isinstance(getattr(tool.annotations, hint), bool), (tool.name, hint)
+            if tool.annotations.readOnlyHint:
+                assert not tool.annotations.destructiveHint, tool.name
+    finally:
+        server.mcp._tool_manager._tools.pop("execute_solidworks_macro", None)
+
+
 def test_commands_run_one_at_a_time_in_order():
     running, overlaps, order = [], [], []
 

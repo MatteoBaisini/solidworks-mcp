@@ -133,7 +133,7 @@ Aggiungi in testa a `MACRO_DOC` una riga che dica che il codice gira con i privi
 
 ### M5. Test che impedisce regressioni · impatto medio
 
-- [ ] Fatto
+- [x] Fatto
 
 In `tests/test_server.py`:
 
