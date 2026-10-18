@@ -79,7 +79,7 @@ read-only sarebbe di nuovo un'incoerenza.
 
 ### M2. Annotazioni letterali su tutti i 57 tool · impatto alto
 
-- [ ] Fatto
+- [x] Fatto
 
 Aggiungi a ogni `@mcp.tool()` il dizionario `annotations={...}` con i quattro hint (formato e profili
 in `AGENTS.md`). Classificazione da applicare:
@@ -104,7 +104,7 @@ Verificato su una copia del codice: con questa classificazione, M1 e M4 l'audit 
 
 ### M3. Descrizioni che dichiarano la sovrascrittura · impatto medio
 
-- [ ] Fatto
+- [x] Fatto
 
 - `export_document`: aggiungi "Existing files with the same name are replaced." (cancella il file prima di riscriverlo, riga ~789: comportamento corretto, va solo dichiarato).
 - `save_document`: aggiungi "Overwrites the target file if it exists."
@@ -112,7 +112,7 @@ Verificato su una copia del codice: con questa classificazione, M1 e M4 l'audit 
 
 ### M4. Macro visibile e dichiarata · impatto medio
 
-- [ ] Fatto
+- [x] Fatto
 
 M8ven mostra `execute_solidworks_macro` **senza descrizione**, perché la descrizione arriva da una
 variabile (`MACRO_DOC`). In `register_macro_tool()`:

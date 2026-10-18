@@ -609,7 +609,8 @@ def _is_disconnected(e: Exception) -> bool:
 # =========================================================================== #
 
 # ------------------------------- Information ------------------------------- #
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False,
+                       "idempotentHint": True, "openWorldHint": False})
 async def get_active_document_info() -> str:
     """Name, path and type of the active SolidWorks document, and the SolidWorks version.
     Starts SolidWorks if it is not running."""
@@ -627,7 +628,8 @@ async def get_active_document_info() -> str:
     return await com_tool(work)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False,
+                       "idempotentHint": True, "openWorldHint": False})
 async def get_mass_properties() -> str:
     """Mass, volume, surface area and centre of mass of the active document (part or assembly)."""
     def work():
@@ -649,7 +651,8 @@ async def get_mass_properties() -> str:
     return await com_tool(work)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False,
+                       "idempotentHint": True, "openWorldHint": False})
 async def get_feature_tree() -> str:
     """List of the features of the active document (design tree), with the type of each."""
     def work():
@@ -667,7 +670,8 @@ async def get_feature_tree() -> str:
     return await com_tool(work)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False,
+                       "idempotentHint": True, "openWorldHint": False})
 async def get_bounding_box() -> str:
     """Bounding box of the solid bodies of the active part: min/max on X, Y, Z and overall size, in mm."""
     def work():
@@ -719,7 +723,8 @@ async def get_screenshot(view: Literal["current", "isometric", "front", "top", "
 
 
 # -------------------------------- Documents -------------------------------- #
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
+                       "idempotentHint": False, "openWorldHint": False})
 async def new_part() -> str:
     """Creates a new empty part from the default SolidWorks part template."""
     def work():
@@ -735,9 +740,11 @@ async def new_part() -> str:
     return await com_tool(work)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": True,
+                       "idempotentHint": True, "openWorldHint": False})
 async def save_document(path: str = "") -> str:
-    """Saves the active document. With 'path' (e.g. C:\\\\projects\\\\part.SLDPRT, .step, .stl, .pdf...)
+    """Saves the active document. Overwrites the target file if it exists.
+    With 'path' (e.g. C:\\\\projects\\\\part.SLDPRT, .step, .stl, .pdf...)
     saves/exports to that file: the format is taken from the extension. When the user has set a
     projects folder, a relative path is relative to it and missing folders inside it are created."""
     def work():
@@ -758,9 +765,11 @@ async def save_document(path: str = "") -> str:
     return await com_tool(work)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": True,
+                       "idempotentHint": True, "openWorldHint": False})
 async def export_document(formats: list[str] | None = None, directory: str = "") -> str:
     """Exports the active document to exchange formats, next to the document or in 'directory'.
+    Existing files with the same name are replaced.
 
     formats: e.g. ["step", "stl"]; omit to use the formats set by the user in the
       configuration (STEP by default). Supported: step, stp, iges, igs, x_t, stl, 3mf, pdf, png.
@@ -798,7 +807,8 @@ async def export_document(formats: list[str] | None = None, directory: str = "")
 
 
 # -------------------------------- Selection -------------------------------- #
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
+                       "idempotentHint": True, "openWorldHint": False})
 async def select_plane(plane: str) -> str:
     """Selects a plane: one of the base planes "front" (XY), "top" (XZ), "right" (YZ), which
     works with SolidWorks in any language, or a plane by name (e.g. one made by create_plane)."""
@@ -812,7 +822,8 @@ async def select_plane(plane: str) -> str:
     return await com_tool(work)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
+                       "idempotentHint": True, "openWorldHint": False})
 async def select_face_at_point(x_mm: float, y_mm: float, z_mm: float) -> str:
     """Selects the face of the part passing through the point (x, y, z) in mm, model coordinates.
     Use get_bounding_box to find the coordinates of the outer faces."""
@@ -824,7 +835,8 @@ async def select_face_at_point(x_mm: float, y_mm: float, z_mm: float) -> str:
     return await com_tool(work)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
+                       "idempotentHint": True, "openWorldHint": False})
 async def select_edge_at_point(x_mm: float, y_mm: float, z_mm: float, append: bool = False) -> str:
     """Selects the edge of the part passing through the point (x, y, z) in mm, model coordinates.
     append=True adds it to the current selection. Tools such as fillet and chamfer take the
@@ -839,7 +851,8 @@ async def select_edge_at_point(x_mm: float, y_mm: float, z_mm: float, append: bo
 
 
 # --------------------------------- Sketches -------------------------------- #
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
+                       "idempotentHint": False, "openWorldHint": False})
 async def start_sketch() -> str:
     """Opens a new sketch on the selected plane or face."""
     def work():
@@ -855,7 +868,8 @@ async def start_sketch() -> str:
     return await com_tool(work)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False,
+                       "idempotentHint": True, "openWorldHint": False})
 async def convert_point(x_mm: float, y_mm: float, z_mm: float = 0.0,
                         to: Literal["sketch", "model"] = "sketch") -> str:
     """Converts a point between model coordinates and the coordinates of the open sketch.
@@ -873,7 +887,8 @@ async def convert_point(x_mm: float, y_mm: float, z_mm: float = 0.0,
     return await com_tool(work)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
+                       "idempotentHint": False, "openWorldHint": False})
 async def end_sketch() -> str:
     """Closes the open sketch without creating a feature."""
     def work():
@@ -886,7 +901,8 @@ async def end_sketch() -> str:
     return await com_tool(work)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
+                       "idempotentHint": False, "openWorldHint": False})
 async def sketch_rectangle(width_mm: float, height_mm: float, center_x_mm: float = 0.0,
                            center_y_mm: float = 0.0) -> str:
     """Draws a rectangle in the open sketch, given centre and size (mm)."""
@@ -902,7 +918,8 @@ async def sketch_rectangle(width_mm: float, height_mm: float, center_x_mm: float
     return await com_tool(work)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
+                       "idempotentHint": False, "openWorldHint": False})
 async def sketch_circle(diameter_mm: float, center_x_mm: float = 0.0, center_y_mm: float = 0.0) -> str:
     """Draws a circle in the open sketch, given centre and DIAMETER (mm)."""
     def work():
@@ -916,7 +933,8 @@ async def sketch_circle(diameter_mm: float, center_x_mm: float = 0.0, center_y_m
     return await com_tool(work)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
+                       "idempotentHint": False, "openWorldHint": False})
 async def sketch_line(x1_mm: float, y1_mm: float, x2_mm: float, y2_mm: float,
                       construction: bool = False) -> str:
     """Draws a line in the open sketch between two points (mm).
@@ -933,7 +951,8 @@ async def sketch_line(x1_mm: float, y1_mm: float, x2_mm: float, y2_mm: float,
     return await com_tool(work)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
+                       "idempotentHint": False, "openWorldHint": False})
 async def sketch_polygon(sides: int, circumscribed_diameter_mm: float, center_x_mm: float = 0.0,
                          center_y_mm: float = 0.0, rotation_deg: float = 0.0) -> str:
     """Draws a regular polygon (e.g. hexagon: sides=6) inscribed in a circle of the given diameter (mm)."""
@@ -951,7 +970,8 @@ async def sketch_polygon(sides: int, circumscribed_diameter_mm: float, center_x_
     return await com_tool(work)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
+                       "idempotentHint": False, "openWorldHint": False})
 async def sketch_arc(center_x_mm: float, center_y_mm: float, start_x_mm: float, start_y_mm: float,
                      end_x_mm: float, end_y_mm: float, counterclockwise: bool = True) -> str:
     """Draws an arc given centre, start point and end point (mm)."""
@@ -965,7 +985,8 @@ async def sketch_arc(center_x_mm: float, center_y_mm: float, start_x_mm: float, 
     return await com_tool(work)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
+                       "idempotentHint": False, "openWorldHint": False})
 async def sketch_slot(x1_mm: float, y1_mm: float, x2_mm: float, y2_mm: float, width_mm: float) -> str:
     """Draws a straight slot (two half circles joined by lines) in the open sketch, given the
     centres of its two ends and its width (mm)."""
@@ -983,7 +1004,8 @@ async def sketch_slot(x1_mm: float, y1_mm: float, x2_mm: float, y2_mm: float, wi
     return await com_tool(work)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
+                       "idempotentHint": False, "openWorldHint": False})
 async def sketch_ellipse(major_diameter_mm: float, minor_diameter_mm: float, center_x_mm: float = 0.0,
                          center_y_mm: float = 0.0, rotation_deg: float = 0.0) -> str:
     """Draws an ellipse in the open sketch, given its two diameters (mm). rotation_deg turns the
@@ -1002,7 +1024,8 @@ async def sketch_ellipse(major_diameter_mm: float, minor_diameter_mm: float, cen
     return await com_tool(work)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
+                       "idempotentHint": False, "openWorldHint": False})
 async def sketch_spline(points: list[list[float]]) -> str:
     """Draws a smooth spline through the points [[x, y], ...] of the open sketch (mm, at least 2).
     Repeat the first point at the end to close it."""
@@ -1017,7 +1040,8 @@ async def sketch_spline(points: list[list[float]]) -> str:
     return await com_tool(work)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
+                       "idempotentHint": False, "openWorldHint": False})
 async def sketch_fillet(radius_mm: float, corner_x_mm: float, corner_y_mm: float) -> str:
     """Rounds the corner of the open sketch at (x, y) (the point where two entities meet) with the
     given radius (mm)."""
@@ -1036,7 +1060,8 @@ async def sketch_fillet(radius_mm: float, corner_x_mm: float, corner_y_mm: float
     return await com_tool(work)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
+                       "idempotentHint": False, "openWorldHint": False})
 async def sketch_offset(distance_mm: float, x_mm: float, y_mm: float, both_sides: bool = False,
                         reverse: bool = False) -> str:
     """Offsets the chain of connected sketch entities passing through (x, y) by distance_mm.
@@ -1057,7 +1082,8 @@ async def sketch_offset(distance_mm: float, x_mm: float, y_mm: float, both_sides
     return await com_tool(work)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
+                       "idempotentHint": False, "openWorldHint": False})
 async def convert_entities(face_points: list[list[float]] | None = None,
                            edge_points: list[list[float]] | None = None) -> str:
     """Projects edges of the model into the open sketch (Convert Entities): all the edges of each
@@ -1087,7 +1113,8 @@ AUTODIM_STATUS = {
 }
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
+                       "idempotentHint": False, "openWorldHint": False})
 async def fully_define_sketch() -> str:
     """Adds the relations and dimensions (measured from the sketch origin) that the open sketch needs
     to be fully defined, so it keeps its shape and can be edited later through its dimensions
@@ -1115,7 +1142,8 @@ def no_dimension_prompt():
         sw.SetUserPreferenceToggle(SW_INPUT_DIM_ON_CREATE, before)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
+                       "idempotentHint": False, "openWorldHint": False})
 async def add_sketch_dimension(x_mm: float, y_mm: float, value: float, x2_mm: float | None = None,
                                y2_mm: float | None = None, text_x_mm: float | None = None,
                                text_y_mm: float | None = None) -> str:
@@ -1155,7 +1183,8 @@ SKETCH_RELATIONS = {
 }
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
+                       "idempotentHint": False, "openWorldHint": False})
 async def add_sketch_relation(relation: Literal["horizontal", "vertical", "coincident", "equal", "parallel",
                                                 "perpendicular", "tangent", "concentric", "collinear",
                                                 "midpoint", "fixed"],
@@ -1207,7 +1236,8 @@ def extrusion_ends(depth_mm: float, end_condition: str, depth2_mm: float,
     return (not depth2_mm, END_CONDITIONS[end_condition], SW_END_BLIND, d1, depth2_mm * MM)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
+                       "idempotentHint": False, "openWorldHint": False})
 async def extrude(depth_mm: float = 0.0,
                   end_condition: Literal["blind", "midplane", "through_all", "up_to_surface"] = "blind",
                   reverse: bool = False, depth2_mm: float = 0.0, draft_angle_deg: float = 0.0,
@@ -1250,7 +1280,8 @@ async def extrude(depth_mm: float = 0.0,
     return await com_tool(work)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
+                       "idempotentHint": False, "openWorldHint": False})
 async def cut_extrude(depth_mm: float = 0.0, through_all: bool = False, reverse: bool = False,
                       flip_side: bool = False, depth2_mm: float = 0.0, draft_angle_deg: float = 0.0,
                       draft_outward: bool = False, up_to_point: list[float] | None = None) -> str:
@@ -1285,7 +1316,8 @@ async def cut_extrude(depth_mm: float = 0.0, through_all: bool = False, reverse:
     return await com_tool(work)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
+                       "idempotentHint": False, "openWorldHint": False})
 async def revolve(angle_deg: float = 360.0, cut: bool = False) -> str:
     """Revolves the last sketch around the construction line it contains
     (create it with sketch_line construction=True). cut=True removes material instead of adding it."""
@@ -1307,7 +1339,8 @@ async def revolve(angle_deg: float = 360.0, cut: bool = False) -> str:
     return await com_tool(work)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
+                       "idempotentHint": False, "openWorldHint": False})
 async def rib(thickness_mm: float, direction: Literal["parallel", "normal"] = "parallel",
               one_side: bool = False, flip_material: bool = False, draft_angle_deg: float = 0.0) -> str:
     """Rib from the last sketch: usually an open line between walls of the part, drawn on a plane
@@ -1330,7 +1363,8 @@ async def rib(thickness_mm: float, direction: Literal["parallel", "normal"] = "p
     return await com_tool(work)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
+                       "idempotentHint": False, "openWorldHint": False})
 async def sweep(path_sketch: str, profile_sketch: str = "", circle_diameter_mm: float = 0.0,
                 cut: bool = False) -> str:
     """Sweeps a profile along a path (pipes, springs, handles, grooves).
@@ -1364,7 +1398,8 @@ async def sweep(path_sketch: str, profile_sketch: str = "", circle_diameter_mm: 
     return await com_tool(work)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
+                       "idempotentHint": False, "openWorldHint": False})
 async def loft(profile_sketches: list[str], guide_sketches: list[str] | None = None, cut: bool = False) -> str:
     """Loft through two or more closed profiles drawn on different planes (see create_plane),
     in order. guide_sketches: optional guide curves touching every profile. cut=True removes
@@ -1390,7 +1425,8 @@ async def loft(profile_sketches: list[str], guide_sketches: list[str] | None = N
     return await com_tool(work)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
+                       "idempotentHint": False, "openWorldHint": False})
 async def create_plane(offset_mm: float, reference: str = "front", face_point: list[float] | None = None,
                        flip: bool = False) -> str:
     """Creates a reference plane parallel to another one, offset_mm away (e.g. for loft profiles).
@@ -1427,7 +1463,8 @@ def select_edges_and_faces(doc: Any, edge_points: list[list[float]] | None,
         select_at(doc, "FACE", p, mark=mark)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
+                       "idempotentHint": False, "openWorldHint": False})
 async def fillet(radius_mm: float, edge_points: list[list[float]] | None = None,
                  face_points: list[list[float]] | None = None) -> str:
     """Rounds edges with a constant radius. edge_points: a point on each edge ([x, y, z] in mm,
@@ -1448,7 +1485,8 @@ async def fillet(radius_mm: float, edge_points: list[list[float]] | None = None,
     return await com_tool(work)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
+                       "idempotentHint": False, "openWorldHint": False})
 async def chamfer(distance_mm: float, edge_points: list[list[float]] | None = None,
                   face_points: list[list[float]] | None = None, angle_deg: float = 45.0,
                   distance2_mm: float = 0.0, flip: bool = False) -> str:
@@ -1470,7 +1508,8 @@ async def chamfer(distance_mm: float, edge_points: list[list[float]] | None = No
     return await com_tool(work)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
+                       "idempotentHint": False, "openWorldHint": False})
 async def shell(thickness_mm: float, open_face_points: list[list[float]] | None = None,
                 outward: bool = False) -> str:
     """Hollows the part leaving walls thickness_mm thick. open_face_points: a point on each face to
@@ -1492,7 +1531,8 @@ async def shell(thickness_mm: float, open_face_points: list[list[float]] | None 
     return await com_tool(work)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
+                       "idempotentHint": False, "openWorldHint": False})
 async def linear_pattern(features: list[str], direction: Literal["x", "y", "z"], count: int, spacing_mm: float,
                          reverse: bool = False, direction2: Literal["", "x", "y", "z"] = "", count2: int = 1,
                          spacing2_mm: float = 0.0, reverse2: bool = False) -> str:
@@ -1523,7 +1563,8 @@ async def linear_pattern(features: list[str], direction: Literal["x", "y", "z"],
     return await com_tool(work)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
+                       "idempotentHint": False, "openWorldHint": False})
 async def circular_pattern(features: list[str], count: int, axis: Literal["x", "y", "z", "edge"] = "z",
                            axis_edge_point: list[float] | None = None, angle_deg: float = 360.0,
                            reverse: bool = False) -> str:
@@ -1553,7 +1594,8 @@ async def circular_pattern(features: list[str], count: int, axis: Literal["x", "
     return await com_tool(work)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
+                       "idempotentHint": False, "openWorldHint": False})
 async def mirror(features: list[str], plane: str = "right", face_point: list[float] | None = None) -> str:
     """Mirrors features (names from get_feature_tree) about a plane: "front", "top", "right", a plane
     name, or the planar face through face_point ([x, y, z] in mm)."""
@@ -1654,7 +1696,8 @@ def _cut_circles(doc: Any, face_point: list[float], centers: list[list[float]], 
     return finish_feature(doc, feat, "The hole cut failed (does it go into the material?).")
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
+                       "idempotentHint": False, "openWorldHint": False})
 async def hole(centers: list[list[float]], size: str = "", diameter_mm: float = 0.0,
                fit: Literal["close", "normal", "loose", "tapped"] = "normal", depth_mm: float = 0.0,
                through_all: bool = False, style: Literal["simple", "counterbore", "countersink"] = "simple",
@@ -1733,7 +1776,8 @@ def material_library() -> list[tuple[str, str, str]]:
     return found
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False,
+                       "idempotentHint": True, "openWorldHint": False})
 async def list_materials(search: str = "") -> str:
     """Materials available in the SolidWorks material databases, filtered by 'search' (part of the
     name or category, e.g. "6061", "steel", "abs"). Use the exact name with set_material."""
@@ -1751,7 +1795,8 @@ async def list_materials(search: str = "") -> str:
     return await com_tool(work)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": True,
+                       "idempotentHint": True, "openWorldHint": False})
 async def set_material(name: str) -> str:
     """Assigns a material to the active part (exact name, see list_materials), so that
     get_mass_properties gives the real mass."""
@@ -1778,7 +1823,8 @@ def dimension_unit(dim: Any) -> tuple[float, str]:
     return MM, " mm"
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False,
+                       "idempotentHint": True, "openWorldHint": False})
 async def get_dimensions(feature: str = "") -> str:
     """Dimensions of a feature or sketch (or of the whole part when 'feature' is empty), with their
     full names (e.g. D1@Boss-Extrude1) and values in mm or degrees, for set_dimension."""
@@ -1799,7 +1845,8 @@ async def get_dimensions(feature: str = "") -> str:
     return await com_tool(work)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": True,
+                       "idempotentHint": True, "openWorldHint": False})
 async def set_dimension(name: str, value: float) -> str:
     """Changes a dimension (name from get_dimensions, e.g. "D1@Boss-Extrude1") to 'value'
     (mm, degrees for angles, a plain number for counts such as pattern instances) and rebuilds."""
@@ -1818,7 +1865,8 @@ async def set_dimension(name: str, value: float) -> str:
     return await com_tool(work)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": True,
+                       "idempotentHint": True, "openWorldHint": False})
 async def suppress_feature(name: str, suppressed: bool = True) -> str:
     """Suppresses (temporarily removes from the model, keeping it in the tree) or, with
     suppressed=False, restores a feature."""
@@ -1832,7 +1880,8 @@ async def suppress_feature(name: str, suppressed: bool = True) -> str:
     return await com_tool(work)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False,
+                       "idempotentHint": True, "openWorldHint": False})
 async def get_equations() -> str:
     """Global variables and equations of the active document, with their index."""
     def work():
@@ -1844,7 +1893,8 @@ async def get_equations() -> str:
     return await com_tool(work)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
+                       "idempotentHint": False, "openWorldHint": False})
 async def add_equation(equation: str) -> str:
     """Adds a global variable or an equation and rebuilds. Names go in double quotes, e.g.
     '"width" = 80' (global variable), '"D1@Boss-Extrude1" = "width" / 2' (drives a dimension).
@@ -1861,7 +1911,8 @@ async def add_equation(equation: str) -> str:
     return await com_tool(work)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": True,
+                       "idempotentHint": False, "openWorldHint": False})
 async def delete_equation(index: int) -> str:
     """Deletes the equation with that index (see get_equations)."""
     def work():
@@ -1881,7 +1932,8 @@ def property_manager(doc: Any) -> Any:
     return doc.Extension.CustomPropertyManager("")
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False,
+                       "idempotentHint": True, "openWorldHint": False})
 async def get_custom_properties() -> str:
     """Custom properties of the active document (description, part number, ...), as used in
     BOMs and title blocks."""
@@ -1901,9 +1953,11 @@ async def get_custom_properties() -> str:
     return await com_tool(work)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": True,
+                       "idempotentHint": True, "openWorldHint": False})
 async def set_custom_property(name: str, value: str) -> str:
-    """Sets a custom property of the active document (created if missing). An empty value deletes it."""
+    """Sets a custom property of the active document (created if missing). Replaces the current value.
+    An empty value deletes it."""
     def work():
         mgr = property_manager(active_doc())
         if not value:
@@ -1916,11 +1970,12 @@ async def set_custom_property(name: str, value: str) -> str:
 
 
 # --------------------------------- Measure --------------------------------- #
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False,
+                       "idempotentHint": True, "openWorldHint": False})
 async def measure(point1: list[float], type1: Literal["face", "edge", "vertex"] = "face",
                   point2: list[float] | None = None, type2: Literal["face", "edge", "vertex"] = "face") -> str:
     """Measures one entity (area, length, diameter...) or the distance and angle between two,
-    picked by a point lying on each ([x, y, z] in mm, model coordinates)."""
+    picked by a point lying on each ([x, y, z] in mm, model coordinates). Replaces the current selection."""
     def work():
         doc = active_doc(SW_DOC_PART)
         leave_sketch(doc)
@@ -1957,7 +2012,8 @@ async def measure(point1: list[float], type1: Literal["face", "edge", "vertex"] 
 
 
 # ------------------------------- Undo / view ------------------------------- #
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": True,
+                       "idempotentHint": False, "openWorldHint": False})
 async def undo(steps: int = 1) -> str:
     """Undoes the last operations in SolidWorks."""
     def work():
@@ -1970,7 +2026,8 @@ async def undo(steps: int = 1) -> str:
     return await com_tool(work)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": True,
+                       "idempotentHint": False, "openWorldHint": False})
 async def delete_feature(name: str) -> str:
     """Deletes a feature from the tree by name (see get_feature_tree)."""
     def work():
@@ -1987,7 +2044,8 @@ async def delete_feature(name: str) -> str:
     return await com_tool(work)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
+                       "idempotentHint": True, "openWorldHint": False})
 async def zoom_to_fit() -> str:
     """Fits the view to show the whole model."""
     def work():
@@ -1997,7 +2055,7 @@ async def zoom_to_fit() -> str:
 
 
 # --------------------------- Free macro (last resort) ---------------------- #
-MACRO_DOC = """Runs Python code that drives the SolidWorks COM API directly.
+MACRO_DOC = """Runs Python code against the SolidWorks COM API with the user's privileges.
 USE ONLY when no dedicated tool is enough (e.g. assemblies, drawings, sheet metal).
 
 Available in the code:
@@ -2044,6 +2102,8 @@ def _macro(python_code: str) -> str:
 
 
 async def execute_solidworks_macro(python_code: str) -> str:
+    """Runs Python code against the SolidWorks COM API with the user's privileges.
+    Last resort when no dedicated tool fits. Disabled unless enabled in the configuration."""
     logger.info("Running Python macro (%d characters)", len(python_code))
 
     def work():
@@ -2053,7 +2113,12 @@ async def execute_solidworks_macro(python_code: str) -> str:
 
 def register_macro_tool() -> None:
     """Exposes execute_solidworks_macro; called only when the configuration enables it."""
-    mcp.add_tool(execute_solidworks_macro, description=MACRO_DOC)
+    mcp.add_tool(
+        execute_solidworks_macro,
+        description=MACRO_DOC,
+        annotations={"readOnlyHint": False, "destructiveHint": True,
+                     "idempotentHint": False, "openWorldHint": True},
+    )
 
 
 # --------------------------------------------------------------------------- #
