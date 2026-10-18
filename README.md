@@ -7,6 +7,9 @@ An [MCP](https://modelcontextprotocol.io) server that lets an AI assistant model
 - Starts SolidWorks if it is not running.
 - Commands run one at a time; if SolidWorks stops answering you get an error instead of a hang.
 
+# M8ven ceritification
+[![M8ven Verified](https://m8ven.ai/badge/mcp/matteobaisini-solidworks-mcp-12f1ym?variant=verified&v=ee9fa8badf81fac9ed8ebe64e6ed319c)](https://m8ven.ai/mcp/matteobaisini-solidworks-mcp-12f1ym?s=readme)
+
 ## Requirements
 
 - Windows with SolidWorks installed and licensed
