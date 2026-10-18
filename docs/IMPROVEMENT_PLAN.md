@@ -207,7 +207,7 @@ controlla che la scheda mostri il nuovo commit; se non si aggiorna entro un gior
 
 ### M9. Reputazione (unica via verso B stabile e A) · continuo
 
-- [ ] Release `v2.1.0` con tag Git e `CHANGELOG.md`
+- [x] Release `v2.1.0` con tag Git e `CHANGELOG.md`
 - [ ] Pubblicazione su PyPI, così l'installazione diventa `uvx solidworks-mcp`
 - [ ] Listing su Glama e sul registro MCP ufficiale (`server.json`); il server con B è listato su Glama
 - [ ] GIF o video di 20 secondi nel README: dal prompt al pezzo finito
