@@ -33,18 +33,66 @@ import sys
 import tempfile
 import time
 import traceback
-import winreg
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Literal
 
-import pythoncom
-import pywintypes
-import win32com.client
-import win32com.client.dynamic
-from win32com.client import VARIANT
-# NB: the right class is dynamic.CDispatch (win32com.client.CDispatch is a different
-# subclass: objects created by dynamic.Dispatch are not instances of it).
-from win32com.client.dynamic import CDispatch
+try:
+    import winreg
+except ImportError:
+    winreg = None
+
+try:
+    import pythoncom
+    import pywintypes
+    import win32com.client
+    import win32com.client.dynamic
+    from win32com.client import VARIANT
+    # NB: the right class is dynamic.CDispatch (win32com.client.CDispatch is a different
+    # subclass: objects created by dynamic.Dispatch are not instances of it).
+    from win32com.client.dynamic import CDispatch
+    COM_AVAILABLE = True
+except ImportError:
+    class _DummyComError(Exception):
+        """Placeholder for pywintypes.com_error when pywin32 is not installed."""
+        pass
+
+    class _PywintypesDummy:
+        com_error = _DummyComError
+
+        @staticmethod
+        def IID(val: str) -> str:
+            return val
+
+    class _PythoncomDummy:
+        VT_DISPATCH = 9
+        VT_ARRAY = 0x2000
+        VT_R8 = 5
+        VT_BYREF = 0x4000
+        VT_BOOL = 11
+        VT_I4 = 3
+        VT_BSTR = 8
+        IID_IDispatch = None
+
+        @staticmethod
+        def CoInitialize() -> None:
+            pass
+
+        @staticmethod
+        def GetActiveObject(clsid: Any) -> Any:
+            raise _DummyComError("COM not available")
+
+    class _VariantDummy:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+    class CDispatch:
+        pass
+
+    pythoncom = _PythoncomDummy()
+    pywintypes = _PywintypesDummy()
+    win32com = None
+    VARIANT = _VariantDummy
+    COM_AVAILABLE = False
 
 from mcp.server.fastmcp import FastMCP, Image
 
@@ -213,6 +261,8 @@ def call(obj: Any, name: str, *args: Any) -> Any:
 
 def _attach() -> Any | None:
     """The running SolidWorks instance, or None when there is none."""
+    if not COM_AVAILABLE:
+        return None
     try:
         clsid = pywintypes.IID("SldWorks.Application")
         unk = pythoncom.GetActiveObject(clsid)
@@ -225,6 +275,8 @@ def find_solidworks_exe() -> str | None:
     """SLDWORKS.exe from the configuration, else from the COM registration."""
     if CONFIG.executable:
         return CONFIG.executable if os.path.isfile(CONFIG.executable) else None
+    if winreg is None:
+        return None
     try:
         clsid = winreg.QueryValue(winreg.HKEY_CLASSES_ROOT, r"SldWorks.Application\CLSID")
         command = winreg.QueryValue(winreg.HKEY_CLASSES_ROOT, rf"CLSID\{clsid}\LocalServer32")
@@ -260,6 +312,10 @@ def _launch() -> Any:
 
 def get_sw() -> Any:
     """Returns the running SolidWorks, starting it when allowed by the configuration."""
+    if not COM_AVAILABLE:
+        raise SWError(
+            "SolidWorks COM API is not available on this platform (requires Windows with pywin32)."
+        )
     app = _sw_cache["app"]
     if app is not None:
         try:

@@ -1,5 +1,8 @@
 # solidworks-mcp
 
+[![tests](https://github.com/MatteoBaisini/solidworks-mcp/actions/workflows/tests.yml/badge.svg)](https://github.com/MatteoBaisini/solidworks-mcp/actions/workflows/tests.yml)
+[![M8ven Trust Score](https://m8ven.ai/badge/mcp/matteobaisini/solidworks-mcp)](https://m8ven.ai/mcp/matteobaisini/solidworks-mcp?s=readme)
+
 An [MCP](https://modelcontextprotocol.io) server that lets an AI assistant model parts in SolidWorks. The assistant sketches, extrudes, cuts, measures and exports through the SolidWorks COM API, in the SolidWorks window you have open, so you can watch and take over at any point.
 
 - Dimensions are always millimetres and degrees.
@@ -7,8 +10,9 @@ An [MCP](https://modelcontextprotocol.io) server that lets an AI assistant model
 - Starts SolidWorks if it is not running.
 - Commands run one at a time; if SolidWorks stops answering you get an error instead of a hang.
 
-# M8ven ceritification
-[![M8ven Verified](https://m8ven.ai/badge/mcp/matteobaisini-solidworks-mcp-12f1ym?variant=verified&v=ee9fa8badf81fac9ed8ebe64e6ed319c)](https://m8ven.ai/mcp/matteobaisini-solidworks-mcp-12f1ym?s=readme)
+## M8ven certification
+
+[![M8ven Trust Score](https://m8ven.ai/badge/mcp/matteobaisini/solidworks-mcp)](https://m8ven.ai/mcp/matteobaisini/solidworks-mcp?s=readme)
 
 ## Requirements
 
@@ -46,6 +50,8 @@ From a clone, run `install.bat` (it creates `.venv` and installs the server in i
 SolidWorks and the server must run with the same privileges: do not run either one as administrator.
 
 ## Tools
+
+Every tool declares standard MCP annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`), allowing clients to automatically authorize safe read and inspection calls while prompting for changes.
 
 | Group | Tools |
 |---|---|

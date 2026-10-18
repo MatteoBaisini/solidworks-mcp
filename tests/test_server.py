@@ -5,7 +5,7 @@ import time
 
 import pytest
 
-server = pytest.importorskip("solidworks_mcp.server", reason="needs Windows with pywin32")
+from solidworks_mcp import server
 
 EXPECTED_TOOLS = {
     "get_active_document_info", "get_mass_properties", "get_feature_tree", "get_bounding_box",

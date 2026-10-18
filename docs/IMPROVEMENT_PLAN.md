@@ -157,8 +157,8 @@ Se esiste già un modo per de-registrare la macro dopo il test attuale, usa quel
 
 ### M6. Test eseguibili ovunque + CI · impatto medio
 
-- [ ] Server importabile senza pywin32
-- [ ] Workflow GitHub Actions
+- [x] Server importabile senza pywin32
+- [x] Workflow GitHub Actions
 
 Oggi `test_server.py` viene saltato fuori da Windows (`importorskip`), quindi un analizzatore su Linux
 non vede mai passare i test dei tool. In `server.py` importa `pythoncom`, `pywintypes`, `win32com`,
@@ -191,7 +191,7 @@ Aggiungi il badge dei test al README.
 
 ### M7. README · impatto basso
 
-- [ ] Fatto
+- [x] Fatto
 
 - Badge M8ven con l'URL canonico `https://m8ven.ai/mcp/matteobaisini/solidworks-mcp` (quello attuale usa il vecchio slug `...-12f1ym`, che reindirizza). Togli `?variant=verified` per mostrare il voto.
 - Correggi il titolo "M8ven ceritification" → "certification".
