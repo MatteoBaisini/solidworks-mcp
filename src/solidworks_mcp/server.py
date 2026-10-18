@@ -689,9 +689,11 @@ async def get_bounding_box() -> str:
     return await com_tool(work)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
+                       "idempotentHint": True, "openWorldHint": False})
 async def get_screenshot(view: Literal["current", "isometric", "front", "top", "right"] = "isometric"):
-    """PNG image of the active model, to check the result visually."""
+    """PNG image of the active model, to check the result visually.
+    Changes the view orientation (unless view='current') and zooms to fit; the model is not modified."""
     view_ids = {"isometric": 7, "front": 1, "top": 5, "right": 4}  # swStandardViews_e (language independent)
 
     def work():
@@ -702,14 +704,13 @@ async def get_screenshot(view: Literal["current", "isometric", "front", "top", "
             except Exception:
                 pass
         call(doc, "ViewZoomtofit2")
-        path = os.path.join(tempfile.gettempdir(), "sw_mcp_snapshot.png")
-        if os.path.exists(path):
-            os.remove(path)
-        err = doc.SaveAs3(path, 0, SW_SAVE_SILENT | SW_SAVE_COPY)
-        if not os.path.exists(path):
-            raise SWError(f"SolidWorks did not save the image (code {err}).")
-        with open(path, "rb") as fh:
-            return fh.read()
+        with tempfile.TemporaryDirectory(prefix="sw_mcp_", ignore_cleanup_errors=True) as tmp:
+            path = os.path.join(tmp, "snapshot.png")
+            err = doc.SaveAs3(path, 0, SW_SAVE_SILENT | SW_SAVE_COPY)
+            if not os.path.exists(path):
+                raise SWError(f"SolidWorks did not save the image (code {err}).")
+            with open(path, "rb") as fh:
+                return fh.read()
 
     result = await com_tool(work)
     if isinstance(result, bytes):
