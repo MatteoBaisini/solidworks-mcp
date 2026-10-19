@@ -163,7 +163,9 @@ MM = 0.001                 # 1 mm in metres
 DEG = math.pi / 180.0      # 1 degree in radians
 
 # SolidWorks API constants used by the server
-SW_DEFAULT_TEMPLATE_PART = 8      # swUserPreferenceStringValue_e.swDefaultTemplatePart
+SW_DEFAULT_TEMPLATE_PART = 8          # swUserPreferenceStringValue_e.swDefaultTemplatePart
+SW_DEFAULT_TEMPLATE_ASSEMBLY = 9      # swUserPreferenceStringValue_e.swDefaultTemplateAssembly
+SW_DEFAULT_TEMPLATE_DRAWING = 10      # swUserPreferenceStringValue_e.swDefaultTemplateDrawing
 SW_MATERIAL_DATABASES = 28        # swUserPreferenceStringValue_e.swFileLocationsMaterialDatabases
 SW_INPUT_DIM_ON_CREATE = 10       # swUserPreferenceToggle_e.swInputDimValOnCreate
 SW_DOC_PART, SW_DOC_ASSEMBLY, SW_DOC_DRAWING = 1, 2, 3
@@ -180,6 +182,21 @@ SW_CUSTOM_INFO_TEXT = 30
 SW_CUSTOM_PROPERTY_REPLACE = 2
 SW_REF_PLANE_DISTANCE, SW_REF_PLANE_FLIP = 8, 256
 DOC_TYPE_NAMES = {SW_DOC_PART: "Part", SW_DOC_ASSEMBLY: "Assembly", SW_DOC_DRAWING: "Drawing"}
+
+MATE_TYPES = {
+    "coincident": 0,
+    "concentric": 1,
+    "perpendicular": 2,
+    "parallel": 3,
+    "tangent": 4,
+    "distance": 5,
+    "angle": 6,
+}
+MATE_ALIGN = {
+    "aligned": 0,
+    "anti_aligned": 1,
+    "closest": 2,
+}
 
 SERVER_INSTRUCTIONS = """\
 Server that drives SolidWorks on the user's PC.
@@ -530,7 +547,7 @@ def select_entity(doc: Any, entity: Any, append: bool, mark: int) -> None:
 
 def select_at(doc: Any, kind: str, point_mm: list[float], append: bool = True, mark: int = 0) -> None:
     """Selects the face / edge / vertex / sketch entity through a point (mm, model coordinates)."""
-    if kind in BODY_LISTS:
+    if kind in BODY_LISTS and call(doc, "GetType") == SW_DOC_PART:
         select_entity(doc, pick(doc, kind, point_mm), append, mark)
         return
     x, y, z = xyz(point_mm)
@@ -991,6 +1008,182 @@ async def export_document(formats: list[str] | None = None, directory: str = "")
                               + (f" Already written: {', '.join(written)}." if written else ""))
             written.append(target)
         return "Exported:\n" + "\n".join(written)
+    return await com_tool(work)
+
+
+# -------------------------------- Assemblies ------------------------------- #
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
+                       "idempotentHint": False, "openWorldHint": False})
+async def new_assembly(template_path: str = "") -> str:
+    """Creates a new empty assembly in SolidWorks using the default or given assembly template."""
+    def work():
+        sw = get_sw()
+        template = template_path or sw.GetUserPreferenceStringValue(SW_DEFAULT_TEMPLATE_ASSEMBLY)
+        if not template or not os.path.isfile(template):
+            try:
+                template = sw.GetDocumentTemplate(SW_DOC_ASSEMBLY, "", 0, 0, 0)
+            except Exception:
+                pass
+        if not template or not os.path.isfile(template):
+            raise SWError("Default assembly template not set or not found "
+                          "(SolidWorks > Options > File Locations / Default Templates).")
+        doc = sw.NewDocument(template, 0, 0, 0)
+        if doc is None:
+            raise SWError("SolidWorks did not create the assembly.")
+        return f"New assembly created: {call(doc, 'GetTitle')}"
+    return await com_tool(work)
+
+
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
+                       "idempotentHint": False, "openWorldHint": False})
+async def insert_component(
+    path: str,
+    x_mm: float = 0.0,
+    y_mm: float = 0.0,
+    z_mm: float = 0.0,
+) -> str:
+    """Inserts a part or sub-assembly component into the active assembly at (x, y, z) mm."""
+    def work():
+        doc = active_doc(SW_DOC_ASSEMBLY)
+        if not os.path.isabs(path) and CONFIG.projects_directory:
+            resolved = resolve_save_path(path)
+        else:
+            resolved = os.path.abspath(path)
+        if not os.path.isfile(resolved):
+            raise SWError(f"Component file not found: '{resolved}'.")
+        try:
+            comp = doc.AddComponent5(resolved, 0, "", False, "", x_mm * MM, y_mm * MM, z_mm * MM)
+        except (pywintypes.com_error, AttributeError):
+            try:
+                comp = doc.AddComponent4(resolved, "", x_mm * MM, y_mm * MM, z_mm * MM)
+            except Exception as e:
+                raise SWError(f"Could not insert component '{resolved}': {e}") from e
+        if comp is None:
+            raise SWError(f"SolidWorks failed to insert component from '{resolved}'.")
+        rebuild(doc)
+        comp_name = getattr(comp, "Name2", None) or call(comp, "Name")
+        return f"Component '{comp_name}' inserted into assembly at ({x_mm}, {y_mm}, {z_mm}) mm."
+    return await com_tool(work)
+
+
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
+                       "idempotentHint": False, "openWorldHint": False})
+async def add_mate(
+    mate_type: Literal["coincident", "concentric", "parallel", "perpendicular", "tangent", "distance", "angle"],
+    entity1_point: list[float] | None = None,
+    entity2_point: list[float] | None = None,
+    entity1_name: str = "",
+    entity2_name: str = "",
+    distance_mm: Annotated[float, Field(ge=0, description="Distance in mm for distance mate")] = 0.0,
+    angle_deg: Annotated[float, Field(ge=0, le=360, description="Angle in degrees for angle mate")] = 0.0,
+    alignment: Literal["aligned", "anti_aligned", "closest"] = "closest",
+    flip: bool = False,
+) -> str:
+    """Adds a geometric mate constraint between two components in the active assembly.
+
+    Specify entities either by 3D points [x, y, z] mm in assembly coordinates lying on the faces/edges,
+    or by entity names (e.g. 'Plane1@Part1-1@Assembly1').
+    Supported mate types: coincident, concentric, parallel, perpendicular, tangent, distance, angle."""
+    def work():
+        doc = active_doc(SW_DOC_ASSEMBLY)
+        doc.ClearSelection2(True)
+
+        if entity1_point:
+            select_at(doc, "FACE", entity1_point, append=False, mark=1)
+        elif entity1_name:
+            if not doc.Extension.SelectByID2(entity1_name, "", 0, 0, 0, False, 1, NOTHING, 0):
+                raise SWError(f"Could not select entity '{entity1_name}'.")
+        else:
+            raise SWError("Provide entity1_point or entity1_name.")
+
+        if entity2_point:
+            select_at(doc, "FACE", entity2_point, append=True, mark=1)
+        elif entity2_name:
+            if not doc.Extension.SelectByID2(entity2_name, "", 0, 0, 0, True, 1, NOTHING, 0):
+                doc.ClearSelection2(True)
+                raise SWError(f"Could not select entity '{entity2_name}'.")
+        else:
+            doc.ClearSelection2(True)
+            raise SWError("Provide entity2_point or entity2_name.")
+
+        mate_type_val = MATE_TYPES[mate_type]
+        align_val = MATE_ALIGN[alignment]
+        dist_val = distance_mm * MM if mate_type == "distance" else 0.0
+        ang_val = angle_deg * DEG if mate_type == "angle" else 0.0
+
+        mate_error = VARIANT(pythoncom.VT_BYREF | pythoncom.VT_I4, 0)
+        try:
+            mate_feat = doc.AddMate5(
+                mate_type_val, align_val, flip,
+                dist_val, 0.0, 0.0, 0.0, 0.0,
+                ang_val, 0.0, 0.0,
+                False, False, 0, mate_error
+            )
+        except (pywintypes.com_error, AttributeError):
+            try:
+                mate_feat = doc.AddMate3(
+                    mate_type_val, align_val, flip,
+                    dist_val, 0.0, 0.0, 0.0, 0.0,
+                    ang_val, 0.0, 0.0,
+                    False, mate_error
+                )
+            except Exception as e:
+                doc.ClearSelection2(True)
+                raise SWError(f"Failed to add mate: {e}") from e
+
+        err_code = getattr(mate_error, "value", 0)
+        doc.ClearSelection2(True)
+        if mate_feat is None or err_code != 0:
+            raise SWError(f"Mate '{mate_type}' failed (error code {err_code}). Check that the selected entities are compatible.")
+
+        name = finish_feature(doc, mate_feat, f"Mate '{mate_type}' failed during rebuild.")
+        return f"Mate '{name}' ({mate_type}) added successfully."
+    return await com_tool(work)
+
+
+@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False,
+                       "idempotentHint": True, "openWorldHint": False})
+async def check_interference() -> str:
+    """Checks the active assembly for volumetric interferences (collisions) between components."""
+    def work():
+        doc = active_doc(SW_DOC_ASSEMBLY)
+        try:
+            doc.ToolsCheckInterference()
+        except Exception:
+            pass
+        mgr = getattr(doc, "InterferenceDetectionManager", None)
+        if mgr is None:
+            raise SWError("Interference detection manager is not available for this assembly.")
+        try:
+            mgr.TreatCoincidenceAsInterference = False
+            mgr.TreatSubAssembliesAsComponents = False
+            mgr.IncludeMultibodyPartInterferences = True
+            interferences = mgr.GetInterferences() or ()
+            count = mgr.GetInterferenceCount()
+            if count == 0 or not interferences:
+                return "No interferences detected."
+            rows = []
+            for i, item in enumerate(interferences):
+                vol_m3 = getattr(item, "Volume", 0.0) or 0.0
+                vol_mm3 = vol_m3 / (MM ** 3)
+                comps = getattr(item, "Components", None)
+                names = []
+                if comps:
+                    try:
+                        for c in comps:
+                            c_name = getattr(c, "Name2", None) or call(c, "Name")
+                            if c_name:
+                                names.append(str(c_name))
+                    except Exception:
+                        pass
+                comp_str = f" between [{', '.join(names)}]" if names else ""
+                rows.append(f"{i + 1}. Interference{comp_str}: volume {vol_mm3:.2f} mm³")
+            return f"Found {count} interference(s):\n" + "\n".join(rows)
+        finally:
+            try:
+                mgr.Done()
+            except Exception:
+                pass
     return await com_tool(work)
 
 

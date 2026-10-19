@@ -19,6 +19,7 @@ EXPECTED_TOOLS = {
     "circular_pattern", "mirror", "hole", "list_materials", "set_material", "get_dimensions",
     "set_dimension", "suppress_feature", "get_equations", "add_equation", "delete_equation",
     "get_custom_properties", "set_custom_property", "measure", "undo", "delete_feature", "zoom_to_fit",
+    "new_assembly", "insert_component", "add_mate", "check_interference",
 }
 
 
@@ -364,11 +365,89 @@ def test_apply_read_only_mode():
         assert "save_document" in removed
 
         current_tools = asyncio.run(server.mcp.list_tools())
-        assert len(current_tools) == 11
+        assert len(current_tools) == 12
         for t in current_tools:
             assert t.annotations.readOnlyHint is True
             assert t.annotations.destructiveHint is False
     finally:
         server.mcp._tool_manager._tools = orig_tools
+
+
+def test_new_assembly(monkeypatch):
+    class FakeDoc:
+        def GetTitle(self): return "Assem1"
+
+    class FakeSW:
+        def GetUserPreferenceStringValue(self, pref): return "C:/templates/assembly.asmdot"
+        def NewDocument(self, tmpl, *args): return FakeDoc()
+
+    monkeypatch.setattr(server, "get_sw", lambda: FakeSW())
+    monkeypatch.setattr(server.os.path, "isfile", lambda p: True)
+    res = asyncio.run(server.new_assembly())
+    assert "New assembly created: Assem1" in res
+
+
+def test_insert_component(tmp_path, monkeypatch):
+    part_file = tmp_path / "part1.SLDPRT"
+    part_file.write_text("fake")
+
+    class FakeComp:
+        def Name(self): return "part1-1"
+
+    class FakeDoc:
+        def AddComponent5(self, path, opt, cfg, silent, ds, x, y, z):
+            return FakeComp()
+
+    monkeypatch.setattr(server, "active_doc", lambda *args: FakeDoc())
+    monkeypatch.setattr(server, "rebuild", lambda doc: None)
+    res = asyncio.run(server.insert_component(str(part_file), 10.0, 20.0, 30.0))
+    assert "Component 'part1-1' inserted into assembly" in res
+
+
+def test_add_mate(monkeypatch):
+    class FakeMateFeat:
+        def Name(self): return "Coincident1"
+        def GetErrorCode2(self, is_warn): return 0
+
+    class FakeExtension:
+        def SelectByID2(self, name, kind, x, y, z, append, mark, nothing, opt):
+            return True
+
+    class FakeDoc:
+        def __init__(self):
+            self.Extension = FakeExtension()
+        def ClearSelection2(self, all): return True
+        def AddMate5(self, *args):
+            return FakeMateFeat()
+
+    monkeypatch.setattr(server, "active_doc", lambda *args: FakeDoc())
+    monkeypatch.setattr(server, "rebuild", lambda doc: None)
+    res = asyncio.run(server.add_mate("coincident", entity1_name="Face1@Part1-1", entity2_name="Face1@Part2-1"))
+    assert "Mate 'Coincident1' (coincident) added successfully" in res
+
+
+def test_check_interference(monkeypatch):
+    class FakeInterference:
+        Volume = 0.000005  # 5000 mm³
+        class FakeComp:
+            def Name(self): return "Part1-1"
+        Components = [FakeComp()]
+
+    class FakeMgr:
+        TreatCoincidenceAsInterference = False
+        TreatSubAssembliesAsComponents = False
+        IncludeMultibodyPartInterferences = True
+        def GetInterferences(self): return [FakeInterference()]
+        def GetInterferenceCount(self): return 1
+        def Done(self): pass
+
+    class FakeDoc:
+        InterferenceDetectionManager = FakeMgr()
+        def ToolsCheckInterference(self): pass
+
+    monkeypatch.setattr(server, "active_doc", lambda *args: FakeDoc())
+    res = asyncio.run(server.check_interference())
+    assert "Found 1 interference(s)" in res
+    assert "5000.00 mm³" in res
 
 

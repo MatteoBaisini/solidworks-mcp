@@ -256,7 +256,7 @@ Ogni task: annotazioni letterali, test, riga nella tabella Tools del README, aud
   `solidworks://active/feature-tree`, `solidworks://materials`.
 - [x] **P7. Modalità sola lettura.** `[safety] read_only = true` nel TOML registra solo i tool READ:
   utile per revisioni di modelli altrui.
-- [ ] **P8. Assiemi.** `new_assembly`, `insert_component`, `add_mate` (coincident, concentric,
+- [x] **P8. Assiemi.** `new_assembly`, `insert_component`, `add_mate` (coincident, concentric,
   parallel, distance, angle), `check_interference` (READ). È la lacuna più grande rispetto a 0xFFD e Slacker.
 - [ ] **P9. Tavole 2D.** `new_drawing` dal pezzo attivo, tre viste standard + isometrica,
   `insert_model_dimensions`, export PDF/DXF.
