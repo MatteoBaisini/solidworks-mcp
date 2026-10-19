@@ -540,7 +540,11 @@ def finish_feature(doc: Any, feat: Any, failure: str) -> str:
     name = call(feat, "Name")
     is_warning = VARIANT(pythoncom.VT_BYREF | pythoncom.VT_BOOL, False)
     code = feat.GetErrorCode2(is_warning)   # swFeatureError_e
-    if code and not is_warning.value:
+    if isinstance(code, tuple):
+        code, is_warn = code[0], bool(code[1])
+    else:
+        is_warn = bool(getattr(is_warning, "value", False))
+    if code and not is_warn:
         raise SWError(f"'{name}' was added but does not rebuild (SolidWorks error {code}). "
                       f"{failure} Remove it with undo or delete_feature.")
     if code:
@@ -746,6 +750,61 @@ async def get_bounding_box() -> str:
         x1, y1, z1, x2, y2, z2 = (v / MM for v in lo + hi)
         return (f"Min: X={x1:.3f} Y={y1:.3f} Z={z1:.3f} mm\nMax: X={x2:.3f} Y={y2:.3f} Z={z2:.3f} mm\n"
                 f"Size: {x2-x1:.3f} x {y2-y1:.3f} x {z2-z1:.3f} mm")
+    return await com_tool(work)
+
+
+@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False,
+                       "idempotentHint": True, "openWorldHint": False})
+async def check_model() -> str:
+    """Checks the active part for rebuild errors, multiple bodies, and geometry faults."""
+    def work():
+        doc = active_doc(SW_DOC_PART)
+        rebuild(doc)
+        features_with_errors = []
+        features_with_warnings = []
+        for feat in iter_features(doc):
+            name = call(feat, "Name")
+            try:
+                is_warning = VARIANT(pythoncom.VT_BYREF | pythoncom.VT_BOOL, False)
+                code = feat.GetErrorCode2(is_warning)
+                if isinstance(code, tuple):
+                    code, is_warn = code[0], bool(code[1])
+                else:
+                    is_warn = bool(getattr(is_warning, "value", False))
+                if code:
+                    if is_warn:
+                        features_with_warnings.append(f"'{name}' (code {code})")
+                    else:
+                        features_with_errors.append(f"'{name}' (code {code})")
+            except Exception:
+                pass
+
+        all_bodies = doc.GetBodies2(0, False) or ()
+        faulty_bodies = []
+        for b in all_bodies:
+            b_name = getattr(b, "Name", "Body")
+            try:
+                fault = call(b, "Check3")
+                if fault is not None:
+                    faulty_bodies.append(b_name)
+            except Exception:
+                pass
+
+        lines = []
+        if features_with_errors:
+            lines.append(f"ERRORS ({len(features_with_errors)}): {', '.join(features_with_errors)}")
+        if len(all_bodies) > 1:
+            lines.append(f"MULTIPLE BODIES ({len(all_bodies)}): the model contains disjoint solid bodies (merge failed).")
+        elif len(all_bodies) == 0:
+            lines.append("NO BODIES: model has no solid geometry.")
+        if faulty_bodies:
+            lines.append(f"GEOMETRY FAULTS ({len(faulty_bodies)}): bodies with invalid geometry: {', '.join(faulty_bodies)}.")
+        if features_with_warnings:
+            lines.append(f"WARNINGS ({len(features_with_warnings)}): {', '.join(features_with_warnings)}")
+
+        if not lines:
+            return f"Model is healthy: {len(all_bodies)} solid body, 0 rebuild errors, 0 geometry faults."
+        return "\n".join(lines)
     return await com_tool(work)
 
 
@@ -1386,12 +1445,11 @@ async def revolve(angle_deg: float = 360.0, cut: bool = False) -> str:
         feat = doc.FeatureManager.FeatureRevolve2(
             True, True, False, cut, False, False, 0, 0, a, 0.0,
             False, False, 0.0, 0.0, 0, 0.0, 0.0, True, True, True)
-        if feat is None:
-            raise SWError(f"Revolve of '{name}' failed: it needs a closed profile and ONE construction "
-                          "line as the axis, not crossing the profile.")
-        doc.ClearSelection2(True)
-        rebuild(doc)
-        return f"Revolve '{call(feat, 'Name')}' created ({angle_deg} degrees)."
+        feat_name = finish_feature(
+            doc, feat,
+            f"Revolve of '{name}' failed: it needs a closed profile and ONE construction "
+            "line as the axis, not crossing the profile.")
+        return f"Revolve '{feat_name}' created ({angle_deg} degrees)."
     return await com_tool(work)
 
 

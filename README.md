@@ -55,7 +55,7 @@ Every tool declares standard MCP annotations (`readOnlyHint`, `destructiveHint`,
 
 | Group | Tools |
 |---|---|
-| Information | `get_active_document_info`, `get_feature_tree`, `get_bounding_box`, `get_mass_properties`, `get_screenshot`, `measure` |
+| Information | `get_active_document_info`, `get_feature_tree`, `get_bounding_box`, `get_mass_properties`, `get_screenshot`, `measure`, `check_model` |
 | Documents | `new_part`, `save_document`, `export_document` |
 | Selection | `select_plane`, `select_face_at_point`, `select_edge_at_point` |
 | Sketch | `start_sketch`, `end_sketch`, `sketch_line`, `sketch_rectangle`, `sketch_circle`, `sketch_arc`, `sketch_polygon`, `sketch_slot`, `sketch_ellipse`, `sketch_spline`, `sketch_fillet`, `sketch_offset`, `convert_entities`, `convert_point` |

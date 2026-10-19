@@ -9,7 +9,7 @@ from solidworks_mcp import server
 
 EXPECTED_TOOLS = {
     "get_active_document_info", "get_mass_properties", "get_feature_tree", "get_bounding_box",
-    "get_screenshot", "new_part", "save_document", "export_document", "select_plane",
+    "get_screenshot", "check_model", "new_part", "save_document", "export_document", "select_plane",
     "select_face_at_point", "select_edge_at_point", "start_sketch", "end_sketch", "convert_point",
     "sketch_rectangle", "sketch_circle", "sketch_line", "sketch_polygon", "sketch_arc", "sketch_slot",
     "sketch_ellipse", "sketch_spline", "sketch_fillet", "sketch_offset", "convert_entities",
@@ -173,3 +173,31 @@ def test_sketch_coordinates_follow_the_sketch_transform(monkeypatch):
     assert server.model_to_sketch(None, [5, 10, -20]) == pytest.approx((5, 20, 0))
     assert server.model_to_sketch(None, [5, 13, -20]) == pytest.approx((5, 20, 3))
     assert server.sketch_to_model(None, 5, 20) == pytest.approx([5, 10, -20])
+
+
+def test_check_model_reports_healthy_model(monkeypatch):
+    class FakeDoc:
+        def GetBodies2(self, kind, visible):
+            return [object()]
+    monkeypatch.setattr(server, "active_doc", lambda *args: FakeDoc())
+    monkeypatch.setattr(server, "rebuild", lambda doc: None)
+    monkeypatch.setattr(server, "iter_features", lambda doc: [])
+    result = asyncio.run(server.check_model())
+    assert "healthy" in result.lower()
+
+
+def test_check_model_detects_errors_and_multiple_bodies(monkeypatch):
+    class FakeFeat:
+        def Name(self):
+            return "Boss-Extrude1"
+        def GetErrorCode2(self, is_warning):
+            return 2
+    class FakeDoc:
+        def GetBodies2(self, kind, visible):
+            return [object(), object()]
+    monkeypatch.setattr(server, "active_doc", lambda *args: FakeDoc())
+    monkeypatch.setattr(server, "rebuild", lambda doc: None)
+    monkeypatch.setattr(server, "iter_features", lambda doc: [FakeFeat()])
+    result = asyncio.run(server.check_model())
+    assert "ERRORS" in result and "Boss-Extrude1" in result
+    assert "MULTIPLE BODIES" in result

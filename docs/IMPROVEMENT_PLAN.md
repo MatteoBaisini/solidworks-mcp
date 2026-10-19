@@ -239,7 +239,7 @@ Ogni task: annotazioni letterali, test, riga nella tabella Tools del README, aud
 - [x] **P1. Errori MCP veri.** Oggi `com_tool` restituisce stringhe `"ERROR: ..."`, che per il client
   sono risposte riuscite. Solleva l'eccezione (FastMCP la trasforma in risultato con `isError: true`)
   così l'agente capisce che il passo è fallito. Aggiorna i test che controllano il testo.
-- [ ] **P2. Verifica dopo ogni feature.** Dopo `extrude`, `cut_extrude`, `fillet` ecc. controlla gli
+- [x] **P2. Verifica dopo ogni feature.** Dopo `extrude`, `cut_extrude`, `fillet` ecc. controlla gli
   errori di rebuild della feature appena creata (`Feature.GetErrorCode2`) e restituiscili; aggiungi un
   tool READ `check_model` (errori di rebuild, corpi multipli, `Body2.Check3`). Ispirazione: hjbaard.
 - [ ] **P3. Output strutturato.** Per `get_bounding_box`, `get_mass_properties`, `measure`,
