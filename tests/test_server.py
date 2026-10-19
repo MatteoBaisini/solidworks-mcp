@@ -201,3 +201,71 @@ def test_check_model_detects_errors_and_multiple_bodies(monkeypatch):
     result = asyncio.run(server.check_model())
     assert "ERRORS" in result and "Boss-Extrude1" in result
     assert "MULTIPLE BODIES" in result
+
+
+def test_structured_output_tools_declare_output_schemas():
+    tools = {t.name: t for t in asyncio.run(server.mcp.list_tools())}
+    for name in ("get_bounding_box", "get_mass_properties", "get_dimensions", "measure"):
+        assert tools[name].outputSchema is not None, f"{name} missing outputSchema"
+        assert tools[name].outputSchema.get("type") == "object", f"{name} schema not object"
+
+
+def test_get_bounding_box_returns_structured_dict(monkeypatch):
+    class FakeBody:
+        def GetExtremePoint(self, x, y, z):
+            return (None, 0.1 if x > 0 else 0.0, 0.05 if y > 0 else 0.0, 0.02 if z > 0 else 0.0)
+
+    class FakeDoc:
+        def GetBodies2(self, kind, visible):
+            return [FakeBody()]
+
+    monkeypatch.setattr(server, "active_doc", lambda *args: FakeDoc())
+    res = asyncio.run(server.get_bounding_box())
+    assert res["min_mm"] == [0.0, 0.0, 0.0]
+    assert res["max_mm"] == [100.0, 50.0, 20.0]
+    assert res["size_mm"] == [100.0, 50.0, 20.0]
+
+
+def test_get_mass_properties_returns_structured_dict(monkeypatch):
+    class FakeMP:
+        def Mass(self): return 1.5
+        def Volume(self): return 0.0005  # m^3
+        def SurfaceArea(self): return 0.04  # m^2
+        def CenterOfMass(self): return (0.01, 0.02, 0.03)
+
+    class FakeDoc:
+        class Extension:
+            @staticmethod
+            def CreateMassProperty2(): return FakeMP()
+
+    monkeypatch.setattr(server, "active_doc", lambda *args: FakeDoc())
+    res = asyncio.run(server.get_mass_properties())
+    assert res["mass_kg"] == 1.5
+    assert res["volume_cm3"] == 500.0
+    assert res["center_of_mass_mm"] == [10.0, 20.0, 30.0]
+
+
+def test_get_dimensions_returns_structured_dict(monkeypatch):
+    class FakeDim:
+        def FullName(self): return "D1@Sketch1@Part1.Part"
+        def SystemValue(self): return 0.05  # 50 mm
+        def GetType(self): return 0
+
+    class FakeDisp:
+        def GetDimension2(self, idx): return FakeDim()
+
+    class FakeFeat:
+        def GetFirstDisplayDimension(self): return FakeDisp()
+        def GetNextDisplayDimension(self, disp): return None
+
+    class FakeDoc:
+        pass
+
+    monkeypatch.setattr(server, "active_doc", lambda *args: FakeDoc())
+    monkeypatch.setattr(server, "find_feature", lambda doc, name: FakeFeat())
+    res = asyncio.run(server.get_dimensions("Sketch1"))
+    assert res["target"] == "Sketch1"
+    assert res["count"] == 1
+    assert res["dimensions"][0]["name"] == "D1@Sketch1"
+    assert res["dimensions"][0]["value"] == 50.0
+    assert res["dimensions"][0]["unit"] == "mm"

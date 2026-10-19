@@ -34,7 +34,49 @@ import tempfile
 import time
 import traceback
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Callable, Literal
+from typing import Any, Callable, Literal, TypedDict
+
+
+class BoundingBox(TypedDict):
+    min_mm: list[float]
+    max_mm: list[float]
+    size_mm: list[float]
+
+
+class MassProperties(TypedDict):
+    mass_kg: float
+    volume_mm3: float
+    volume_cm3: float
+    surface_area_mm2: float
+    center_of_mass_mm: list[float] | None
+
+
+class DimensionItem(TypedDict):
+    name: str
+    value: float
+    unit: str
+
+
+class DimensionResult(TypedDict):
+    target: str
+    count: int
+    dimensions: list[DimensionItem]
+
+
+class MeasureResult(TypedDict, total=False):
+    distance_mm: float
+    center_distance_mm: float
+    normal_distance_mm: float
+    angle_deg: float
+    length_mm: float
+    diameter_mm: float
+    radius_mm: float
+    area_mm2: float
+    perimeter_mm: float
+    delta_mm: list[float]
+    is_parallel: bool
+    is_perpendicular: bool
+
 
 try:
     import winreg
@@ -690,7 +732,7 @@ async def get_active_document_info() -> str:
 
 @mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False,
                        "idempotentHint": True, "openWorldHint": False})
-async def get_mass_properties() -> str:
+async def get_mass_properties() -> MassProperties:
     """Mass, volume, surface area and centre of mass of the active document (part or assembly)."""
     def work():
         doc = active_doc()
@@ -705,9 +747,14 @@ async def get_mass_properties() -> str:
             raise SWError("Could not compute the mass properties (does the model have a solid body?).")
         mass, vol, area = call(mp, "Mass"), call(mp, "Volume"), call(mp, "SurfaceArea")
         cg = call(mp, "CenterOfMass")
-        cg_txt = f"\nCentre of mass: X={cg[0]/MM:.3f} Y={cg[1]/MM:.3f} Z={cg[2]/MM:.3f} mm" if cg else ""
-        return (f"Mass: {mass:.4f} kg\nVolume: {vol/MM**3:.2f} mm^3 ({vol*1e6:.3f} cm^3)\n"
-                f"Surface area: {area/MM**2:.2f} mm^2{cg_txt}")
+        cg_mm = [round(float(cg[0] / MM), 3), round(float(cg[1] / MM), 3), round(float(cg[2] / MM), 3)] if cg else None
+        return {
+            "mass_kg": round(float(mass), 4),
+            "volume_mm3": round(float(vol / MM ** 3), 2),
+            "volume_cm3": round(float(vol * 1e6), 3),
+            "surface_area_mm2": round(float(area / MM ** 2), 2),
+            "center_of_mass_mm": cg_mm,
+        }
     return await com_tool(work)
 
 
@@ -732,7 +779,7 @@ async def get_feature_tree() -> str:
 
 @mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False,
                        "idempotentHint": True, "openWorldHint": False})
-async def get_bounding_box() -> str:
+async def get_bounding_box() -> BoundingBox:
     """Bounding box of the solid bodies of the active part: min/max on X, Y, Z and overall size, in mm."""
     def work():
         doc = active_doc(SW_DOC_PART)
@@ -748,8 +795,11 @@ async def get_bounding_box() -> str:
                     _, *point = body.GetExtremePoint(*direction)   # exact, unlike GetBodyBox
                     lo[axis], hi[axis] = min(lo[axis], point[axis]), max(hi[axis], point[axis])
         x1, y1, z1, x2, y2, z2 = (v / MM for v in lo + hi)
-        return (f"Min: X={x1:.3f} Y={y1:.3f} Z={z1:.3f} mm\nMax: X={x2:.3f} Y={y2:.3f} Z={z2:.3f} mm\n"
-                f"Size: {x2-x1:.3f} x {y2-y1:.3f} x {z2-z1:.3f} mm")
+        return {
+            "min_mm": [round(float(x1), 3), round(float(y1), 3), round(float(z1), 3)],
+            "max_mm": [round(float(x2), 3), round(float(y2), 3), round(float(z2), 3)],
+            "size_mm": [round(float(x2 - x1), 3), round(float(y2 - y1), 3), round(float(z2 - z1), 3)],
+        }
     return await com_tool(work)
 
 
@@ -1939,23 +1989,27 @@ def dimension_unit(dim: Any) -> tuple[float, str]:
 
 @mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False,
                        "idempotentHint": True, "openWorldHint": False})
-async def get_dimensions(feature: str = "") -> str:
+async def get_dimensions(feature: str = "") -> DimensionResult:
     """Dimensions of a feature or sketch (or of the whole part when 'feature' is empty), with their
     full names (e.g. D1@Boss-Extrude1) and values in mm or degrees, for set_dimension."""
     def work():
         doc = active_doc(SW_DOC_PART)
         feats = [find_feature(doc, feature)] if feature else list(iter_features(doc))
-        rows = []
+        dims: list[DimensionItem] = []
         for f in feats:
             disp = call(f, "GetFirstDisplayDimension")
             while disp is not None:
                 dim = disp.GetDimension2(0)
                 scale, unit = dimension_unit(dim)
                 name = "@".join(call(dim, "FullName").split("@")[:2])  # drop the "@Part1.Part" suffix
-                rows.append(f"{name} = {call(dim, 'SystemValue') / scale:g}{unit}")
+                val = float(call(dim, "SystemValue") / scale)
+                dims.append({"name": name, "value": round(val, 4), "unit": unit.strip()})
                 disp = f.GetNextDisplayDimension(disp)
-        where = f"'{feature}'" if feature else "the part"
-        return f"Dimensions of {where}:\n" + "\n".join(rows) if rows else f"{where} has no dimensions."
+        return {
+            "target": feature if feature else "part",
+            "count": len(dims),
+            "dimensions": dims,
+        }
     return await com_tool(work)
 
 
@@ -2087,7 +2141,7 @@ async def set_custom_property(name: str, value: str) -> str:
 @mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False,
                        "idempotentHint": True, "openWorldHint": False})
 async def measure(point1: list[float], type1: Literal["face", "edge", "vertex"] = "face",
-                  point2: list[float] | None = None, type2: Literal["face", "edge", "vertex"] = "face") -> str:
+                  point2: list[float] | None = None, type2: Literal["face", "edge", "vertex"] = "face") -> MeasureResult:
     """Measures one entity (area, length, diameter...) or the distance and angle between two,
     picked by a point lying on each ([x, y, z] in mm, model coordinates). Replaces the current selection."""
     def work():
@@ -2103,25 +2157,29 @@ async def measure(point1: list[float], type1: Literal["face", "edge", "vertex"] 
         doc.ClearSelection2(True)
         if not ok:
             raise SWError("Could not measure the selected entities.")
-        rows = []
-        for label, prop, scale, unit in (
-                ("Distance", "Distance", MM, "mm"), ("Centre distance", "CenterDistance", MM, "mm"),
-                ("Normal distance", "NormalDistance", MM, "mm"), ("Angle", "Angle", DEG, "deg"),
-                ("Length", "Length", MM, "mm"), ("Diameter", "Diameter", MM, "mm"),
-                ("Radius", "Radius", MM, "mm"), ("Area", "Area", MM ** 2, "mm^2"),
-                ("Perimeter", "Perimeter", MM, "mm")):
+        res: MeasureResult = {}
+        for prop, key, scale in (
+                ("Distance", "distance_mm", MM),
+                ("CenterDistance", "center_distance_mm", MM),
+                ("NormalDistance", "normal_distance_mm", MM),
+                ("Angle", "angle_deg", DEG),
+                ("Length", "length_mm", MM),
+                ("Diameter", "diameter_mm", MM),
+                ("Radius", "radius_mm", MM),
+                ("Area", "area_mm2", MM ** 2),
+                ("Perimeter", "perimeter_mm", MM)):
             v = call(m, prop)
             if v is not None and v != -1:
-                rows.append(f"{label}: {v / scale:.4f} {unit}")
+                res[key] = round(float(v / scale), 4)
         if point2:
             dx, dy, dz = (call(m, p) for p in ("DeltaX", "DeltaY", "DeltaZ"))
             if call(m, "Distance") not in (None, -1):
-                rows.append(f"dX, dY, dZ: {dx / MM:.4f}, {dy / MM:.4f}, {dz / MM:.4f} mm")
+                res["delta_mm"] = [round(float(dx / MM), 4), round(float(dy / MM), 4), round(float(dz / MM), 4)]
             if call(m, "IsParallel"):
-                rows.append("Parallel")
+                res["is_parallel"] = True
             if call(m, "IsPerpendicular"):
-                rows.append("Perpendicular")
-        return "\n".join(rows) or "Nothing measurable."
+                res["is_perpendicular"] = True
+        return res
     return await com_tool(work)
 
 

@@ -242,7 +242,7 @@ Ogni task: annotazioni letterali, test, riga nella tabella Tools del README, aud
 - [x] **P2. Verifica dopo ogni feature.** Dopo `extrude`, `cut_extrude`, `fillet` ecc. controlla gli
   errori di rebuild della feature appena creata (`Feature.GetErrorCode2`) e restituiscili; aggiungi un
   tool READ `check_model` (errori di rebuild, corpi multipli, `Body2.Check3`). Ispirazione: hjbaard.
-- [ ] **P3. Output strutturato.** Per `get_bounding_box`, `get_mass_properties`, `measure`,
+- [x] **P3. Output strutturato.** Per `get_bounding_box`, `get_mass_properties`, `measure`,
   `get_dimensions` restituisci un `TypedDict`/modello Pydantic: FastMCP genera `outputSchema` e
   l'agente legge numeri, non testo da interpretare.
 - [ ] **P4. Input validati.** Usa `Annotated[float, Field(gt=0, description="...")]` per diametri,
