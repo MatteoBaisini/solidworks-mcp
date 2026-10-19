@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Release workflow** (`.github/workflows/installer.yml`): builds the installer with NSIS and attaches it to the GitHub release of every `v*` tag.
 - `tests/test_installer.py`: checks the installer's settings, configuration template, tool names in `CLAUDE.md` and packaged files.
 
+### Changed
+- README: removed the duplicate M8ven badge section.
+
 ## [2.2.0] - 2026-10-19
 
 ### Added
