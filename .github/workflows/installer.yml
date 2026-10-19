@@ -1,0 +1,65 @@
+name: installer
+
+# Builds the Windows installer (installer/dist/SolidWorks-MCP-Setup.exe).
+# On a version tag (v*) it also publishes a GitHub release with the installer attached,
+# which is what installed copies update to. Run it by hand from the Actions tab to
+# get the installer as a downloadable artifact without releasing.
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths: ["installer/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check PowerShell scripts
+        shell: pwsh
+        run: |
+          $failed = $false
+          foreach ($file in Get-ChildItem installer/app/*.ps1) {
+            $tokens = $null; $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref]$tokens, [ref]$errors)
+            foreach ($e in $errors) { Write-Host "$($file.Name):$($e.Extent.StartLineNumber): $($e.Message)"; $failed = $true }
+            if ((Get-Content -Raw $file.FullName) -match '[^\x00-\x7F]') {
+              Write-Host "$($file.Name): use ASCII only (Windows PowerShell 5.1 reads BOM-less scripts as ANSI)"; $failed = $true
+            }
+          }
+          if ($failed) { exit 1 }
+
+      - name: Check the tag matches the package version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          version="$(sed -n 's/^__version__ = "\(.*\)"/\1/p' src/solidworks_mcp/__init__.py)"
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match __version__ $version" >&2
+            exit 1
+          fi
+
+      - name: Build
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q nsis
+          bash installer/build.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SolidWorks-MCP-Setup
+          path: installer/dist/SolidWorks-MCP-Setup.exe
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes
+          fi
+          gh release upload "$GITHUB_REF_NAME" installer/dist/SolidWorks-MCP-Setup.exe --clobber
