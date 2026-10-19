@@ -1,0 +1,18 @@
+# SolidWorks-MCP settings for this folder.
+# Every available key is documented in
+# https://github.com/MatteoBaisini/solidworks-mcp/blob/main/config.example.toml
+# Close and reopen SolidWorks-MCP after a change.
+
+[projects]
+# Where the assistant saves parts, relative to this file.
+directory = "projects"
+
+[export]
+# Formats written by export_document by default (step, stl, 3mf, iges, x_t, pdf, png...).
+formats = ["step"]
+# projects/<project>/cad/part.SLDPRT -> projects/<project>/step/part.step
+directory = "../{format}"
+
+[macro]
+# Lets the assistant run arbitrary Python code on this PC. Leave off unless you need it.
+enabled = false

@@ -24,6 +24,22 @@ Developed and tested on SolidWorks 2026. The API calls used go back many release
 
 ## Install
 
+### One-click installer (Windows)
+
+Download **[SolidWorks-MCP-Setup.exe](https://github.com/MatteoBaisini/solidworks-mcp/releases/latest/download/SolidWorks-MCP-Setup.exe)** and run it. It needs no administrator rights and sets up everything for [Claude Code](https://code.claude.com):
+
+- [uv](https://docs.astral.sh/uv/) and this server, pinned to the latest release (no Python or Git needed beforehand)
+- Claude Code, if it is not installed yet
+- a work folder, `Documents\SolidWorks-MCP`, with `.mcp.json`, design instructions for the assistant (`CLAUDE.md`), the server's tools pre-approved, and a `projects` folder for your parts
+
+Then double-click **SolidWorks-MCP** on the desktop: Claude Code opens in the work folder and starts the server. The first time, it asks you to log in (Pro, Max, Team or Enterprise plan) and to trust the folder. The shortcut checks for a new release once a day; *Start menu > SolidWorks-MCP > Repair* fixes a broken install, and uninstalling keeps your work folder.
+
+The installer is not code-signed, so Windows SmartScreen may show *Windows protected your PC*: choose *More info > Run anyway*.
+
+To build it yourself: `bash installer/build.sh` (needs [NSIS](https://nsis.sourceforge.io)). Pushing a `v*` tag builds it on GitHub Actions and attaches it to the release.
+
+### Manual install
+
 With [uv](https://docs.astral.sh/uv/), nothing needs installing by hand. Add the server to your MCP client configuration:
 
 ```json
