@@ -79,6 +79,15 @@ How the assistant points at things:
 - `hole` drills plain, counterbored or countersunk holes, sized by diameter or by metric screw size (ISO 273 clearance, tap drill, ISO 4762 / ISO 10642 counterbores and countersinks). Threads are not modelled.
 - Linear and circular patterns run along the model axes (a hidden reference axis is added the first time) or around an edge.
 
+## Prompts & Resources
+
+In addition to tools, the server exposes standard MCP prompts and live read-only resources:
+
+- **Prompt `design_part`**: Step-by-step guidance and recommended workflow for mechanical design from initial plane selection to feature creation, inspection, and export.
+- **Resource `solidworks://active/info`**: Live status, document title, file path, document type, and SolidWorks revision.
+- **Resource `solidworks://active/feature-tree`**: Current design feature tree with names and types.
+- **Resource `solidworks://materials`**: Configured material databases and categories.
+
 ## Configuration
 
 Settings live in a TOML file; every key is optional. Copy [`config.example.toml`](config.example.toml), which documents all of them, and tell the server where it is in one of these ways (first match wins):

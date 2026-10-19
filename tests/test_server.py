@@ -334,3 +334,22 @@ def test_save_document_overwrite_protection(tmp_path, monkeypatch):
     res = asyncio.run(server.save_document("existing.SLDPRT", overwrite=True))
     assert "Saved to" in res
 
+
+def test_mcp_prompts_and_resources(monkeypatch):
+    prompts = {p.name: p for p in asyncio.run(server.mcp.list_prompts())}
+    assert "design_part" in prompts
+    prompt_res = asyncio.run(server.mcp.get_prompt("design_part", arguments={"description": "mounting bracket"}))
+    assert len(prompt_res.messages) == 1
+    assert "mounting bracket" in prompt_res.messages[0].content.text
+    assert "extrude" in prompt_res.messages[0].content.text
+
+    resources = {str(r.uri): r for r in asyncio.run(server.mcp.list_resources())}
+    assert "solidworks://active/info" in resources
+    assert "solidworks://active/feature-tree" in resources
+    assert "solidworks://materials" in resources
+
+    # Test reading solidworks://materials
+    monkeypatch.setattr(server, "material_library", lambda: [("SolidWorks Materials", "Steel", "AISI 304")])
+    mat_content = asyncio.run(server.mcp.read_resource("solidworks://materials"))
+    assert any("AISI 304" in str(c) for c in mat_content)
+

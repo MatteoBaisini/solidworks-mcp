@@ -2350,6 +2350,51 @@ def register_macro_tool() -> None:
     )
 
 
+# ---------------------------- Prompts & Resources ------------------------- #
+@mcp.prompt(name="design_part", description="Guidance and recommended workflow for modeling a 3D part in SolidWorks")
+def design_part(description: str = "") -> str:
+    """Returns step-by-step guidance for designing a 3D mechanical part in SolidWorks."""
+    prompt_text = (
+        "Follow this rigorous workflow to design a mechanical part in SolidWorks:\n\n"
+        "1. Preparation:\n"
+        "   - Call `get_active_document_info` to inspect the current state.\n"
+        "   - If no part document is open, call `new_part` to create a fresh model.\n\n"
+        "2. Base Feature:\n"
+        "   - Select a reference plane (`select_plane` with 'front', 'top', or 'right').\n"
+        "   - Open a sketch using `start_sketch`.\n"
+        "   - Draw profiles using 2D sketch tools (e.g. `sketch_rectangle`, `sketch_circle`).\n"
+        "   - Call `end_sketch` or directly invoke `extrude` (or `revolve`) to build the base solid.\n\n"
+        "3. Secondary Features & Details:\n"
+        "   - Select model faces via `select_face_at_point` or create planes via `create_plane`.\n"
+        "   - Add cuts (`cut_extrude`), standard holes (`hole` with ISO metric sizes like 'M4', 'M6'), ribs (`rib`), fillets (`fillet`), chamfers (`chamfer`), or patterns (`linear_pattern`, `circular_pattern`).\n\n"
+        "4. Validation & Quality Check:\n"
+        "   - Verify rebuild health, multi-body issues, and geometry faults with `check_model`.\n"
+        "   - Check final dimensions and volume with `get_bounding_box` and `get_mass_properties`.\n"
+        "   - Optionally assign material with `set_material` (e.g. 6061 alloy, steel) and capture a visual check with `get_screenshot`.\n\n"
+        "5. Finalizing & Saving:\n"
+        "   - Save the part using `save_document(path=...)`.\n"
+        "   - If needed, export manufacturing formats with `export_document(formats=['step', 'stl'])`."
+    )
+    if description:
+        prompt_text += f"\n\nGoal for this part:\n{description}"
+    return prompt_text
+
+
+@mcp.resource("solidworks://active/info", description="Active SolidWorks document information and version")
+async def resource_active_info() -> str:
+    return await get_active_document_info()
+
+
+@mcp.resource("solidworks://active/feature-tree", description="Active SolidWorks document feature tree")
+async def resource_feature_tree() -> str:
+    return await get_feature_tree()
+
+
+@mcp.resource("solidworks://materials", description="Available SolidWorks material databases and categories")
+async def resource_materials() -> str:
+    return await list_materials()
+
+
 # --------------------------------------------------------------------------- #
 def main(argv: list[str] | None = None) -> None:
     global CONFIG
