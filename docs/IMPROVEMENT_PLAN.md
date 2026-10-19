@@ -248,7 +248,7 @@ Ogni task: annotazioni letterali, test, riga nella tabella Tools del README, aud
 - [x] **P4. Input validati.** Usa `Annotated[float, Field(gt=0, description="...")]` per diametri,
   profondità, spessori, numero di lati. Schemi più precisi = meno chiamate sbagliate (Slacker perde
   un controllo qualità per questo).
-- [ ] **P5. Salvataggi sicuri.** `save_document` con percorso assoluto può sovrascrivere qualsiasi
+- [x] **P5. Salvataggi sicuri.** `save_document` con percorso assoluto può sovrascrivere qualsiasi
   file. Aggiungi `overwrite: bool = False`; con cartella progetti impostata rifiuta percorsi esterni
   e `..`. Ispirazione: 0xFFD, Slacker.
 - [ ] **P6. Prompt e risorse MCP.** Prompt `design_part` con il flusso tipico (piano → sketch →

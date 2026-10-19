@@ -1,5 +1,6 @@
 """Offline checks: the server loads and queues commands correctly. SolidWorks is not needed."""
 import asyncio
+import os
 import threading
 import time
 
@@ -128,13 +129,17 @@ def test_save_paths_resolve_under_the_projects_folder(tmp_path, monkeypatch):
 
     existing = tmp_path / "existing"
     existing.mkdir()
-    assert server.resolve_save_path(str(existing / "part.step")) == str(existing / "part.step")
+    with pytest.raises(server.SWError, match="outside the configured projects directory"):
+        server.resolve_save_path(str(existing / "part.step"))
 
 
-def test_relative_save_path_needs_a_projects_folder(monkeypatch):
+def test_relative_save_path_needs_a_projects_folder(tmp_path, monkeypatch):
     monkeypatch.setattr(server.CONFIG, "projects_directory", "")
     with pytest.raises(server.SWError):
         server.resolve_save_path("bracket/cad/part.SLDPRT")
+    existing = tmp_path / "existing"
+    existing.mkdir()
+    assert server.resolve_save_path(str(existing / "part.step")) == str(existing / "part.step")
 
 
 def test_hole_sizes_come_from_the_metric_table():
@@ -280,3 +285,52 @@ def test_input_validation_schema():
     pattern_props = tools["linear_pattern"].inputSchema["properties"]
     assert pattern_props["count"].get("minimum") == 2
     assert pattern_props["spacing_mm"].get("exclusiveMinimum") == 0
+
+
+def test_resolve_save_path_confinement(tmp_path, monkeypatch):
+    proj_dir = str(tmp_path / "projects")
+    os.makedirs(proj_dir, exist_ok=True)
+    monkeypatch.setattr(server.CONFIG, "projects_directory", proj_dir)
+
+    # Valid relative path
+    resolved = server.resolve_save_path("part1.SLDPRT")
+    assert resolved == os.path.normpath(os.path.join(proj_dir, "part1.SLDPRT"))
+
+    # Valid subfolder
+    resolved_sub = server.resolve_save_path("sub/folder/part2.SLDPRT")
+    assert resolved_sub == os.path.normpath(os.path.join(proj_dir, "sub", "folder", "part2.SLDPRT"))
+    assert os.path.isdir(os.path.join(proj_dir, "sub", "folder"))
+
+    # Path traversal attempt outside projects_directory
+    with pytest.raises(server.SWError, match="outside the configured projects directory"):
+        server.resolve_save_path("../outside.SLDPRT")
+
+    # Absolute path outside projects_directory
+    outside_abs = str(tmp_path / "outside.SLDPRT")
+    with pytest.raises(server.SWError, match="outside the configured projects directory"):
+        server.resolve_save_path(outside_abs)
+
+
+def test_save_document_overwrite_protection(tmp_path, monkeypatch):
+    proj_dir = str(tmp_path / "projects")
+    os.makedirs(proj_dir, exist_ok=True)
+    monkeypatch.setattr(server.CONFIG, "projects_directory", proj_dir)
+
+    existing_file = os.path.join(proj_dir, "existing.SLDPRT")
+    with open(existing_file, "w") as f:
+        f.write("content")
+
+    class FakeDoc:
+        def SaveAs3(self, target, opt, flags):
+            return 0
+
+    monkeypatch.setattr(server, "active_doc", lambda *args: FakeDoc())
+
+    # Saving with overwrite=False on existing file must raise SWError
+    with pytest.raises(server.SWError, match="already exists. Set overwrite=True"):
+        asyncio.run(server.save_document("existing.SLDPRT", overwrite=False))
+
+    # Saving with overwrite=True succeeds
+    res = asyncio.run(server.save_document("existing.SLDPRT", overwrite=True))
+    assert "Saved to" in res
+

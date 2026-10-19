@@ -448,21 +448,29 @@ def close_sketch_and_select_it(doc: Any) -> str:
 
 def resolve_save_path(path: str) -> str:
     """Full path for a save: relative paths go under the projects folder, where missing
-    folders are created; anywhere else the folder must already exist."""
+    folders are created. When a projects folder is set, paths are confined to it and
+    escaping via '..' or absolute paths outside the projects folder is forbidden."""
     root = CONFIG.projects_directory
-    if not os.path.isabs(path):
-        if not root:
+    if root:
+        norm_root = os.path.normcase(os.path.abspath(root))
+        if not os.path.isabs(path):
+            full_path = os.path.normpath(os.path.abspath(os.path.join(root, path)))
+        else:
+            full_path = os.path.normpath(os.path.abspath(path))
+        norm_full = os.path.normcase(full_path)
+        if not (norm_full == norm_root or norm_full.startswith(norm_root + os.sep)):
+            raise SWError(f"Access denied: '{path}' is outside the configured projects directory ({root}).")
+        folder = os.path.dirname(full_path)
+        os.makedirs(folder, exist_ok=True)
+        return full_path
+    else:
+        if not os.path.isabs(path):
             raise SWError("Give a full path: no projects folder is set in the configuration.")
-        path = os.path.join(root, path)
-    path = os.path.normpath(path)
-    folder = os.path.dirname(path)
-    if not os.path.isdir(folder):
-        inside = bool(root) and os.path.normcase(folder + os.sep).startswith(
-            os.path.normcase(os.path.normpath(root) + os.sep))
-        if not inside:
+        full_path = os.path.normpath(os.path.abspath(path))
+        folder = os.path.dirname(full_path)
+        if not os.path.isdir(folder):
             raise SWError(f"The folder {folder} does not exist.")
-        os.makedirs(folder)
-    return path
+        return full_path
 
 
 def rebuild(doc: Any) -> None:
@@ -908,22 +916,31 @@ async def new_part() -> str:
 
 @mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": True,
                        "idempotentHint": True, "openWorldHint": False})
-async def save_document(path: str = "") -> str:
-    """Saves the active document. Overwrites the target file if it exists.
+async def save_document(path: str = "", overwrite: bool = False) -> str:
+    """Saves the active document.
     With 'path' (e.g. C:\\\\projects\\\\part.SLDPRT, .step, .stl, .pdf...)
     saves/exports to that file: the format is taken from the extension. When the user has set a
-    projects folder, a relative path is relative to it and missing folders inside it are created."""
+    projects folder, relative paths are confined to it and missing folders inside it are created.
+    If the target file already exists, overwrite must be True or the save is rejected."""
     def work():
         doc = active_doc()
         if not path:
-            if not call(doc, "GetPathName"):
+            target = call(doc, "GetPathName")
+            if not target:
                 raise SWError("The document was never saved: give a full path.")
+            if CONFIG.projects_directory:
+                norm_root = os.path.normcase(os.path.abspath(CONFIG.projects_directory))
+                norm_target = os.path.normcase(os.path.abspath(target))
+                if not (norm_target == norm_root or norm_target.startswith(norm_root + os.sep)):
+                    raise SWError(f"Access denied: document '{target}' is outside the configured projects directory.")
             ok = doc.Save3(SW_SAVE_SILENT, VARIANT(pythoncom.VT_BYREF | pythoncom.VT_I4, 0),
                            VARIANT(pythoncom.VT_BYREF | pythoncom.VT_I4, 0))
             if not ok:
                 raise SWError("Save failed.")
             return "Document saved."
         target = resolve_save_path(path)
+        if os.path.exists(target) and not overwrite:
+            raise SWError(f"File '{target}' already exists. Set overwrite=True to overwrite it.")
         err = doc.SaveAs3(target, 0, SW_SAVE_SILENT)
         if err != 0 or not os.path.exists(target):
             raise SWError(f"Save failed (SolidWorks error code {err}).")
@@ -959,6 +976,11 @@ async def export_document(formats: list[str] | None = None, directory: str = "")
                     raise SWError("The document was never saved: save it first, or give an absolute directory.")
                 folder = os.path.join(os.path.dirname(doc_path), folder)
             folder = os.path.normpath(folder)
+            if CONFIG.projects_directory:
+                norm_root = os.path.normcase(os.path.abspath(CONFIG.projects_directory))
+                norm_folder = os.path.normcase(os.path.abspath(folder))
+                if not (norm_folder == norm_root or norm_folder.startswith(norm_root + os.sep)):
+                    raise SWError(f"Access denied: export directory '{folder}' is outside the configured projects directory.")
             os.makedirs(folder, exist_ok=True)
             target = os.path.join(folder, f"{stem}.{ext}")
             if os.path.exists(target):
@@ -2221,7 +2243,7 @@ async def measure(point1: list[float], type1: Literal["face", "edge", "vertex"] 
 # ------------------------------- Undo / view ------------------------------- #
 @mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": True,
                        "idempotentHint": False, "openWorldHint": False})
-async def undo(steps: int = 1) -> str:
+async def undo(steps: Annotated[int, Field(ge=1, description="Number of steps to undo (>= 1)")] = 1) -> str:
     """Undoes the last operations in SolidWorks."""
     def work():
         doc = active_doc()
