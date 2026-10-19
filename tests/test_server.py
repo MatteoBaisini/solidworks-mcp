@@ -77,9 +77,14 @@ def test_stuck_command_times_out_and_later_ones_fail_fast(monkeypatch):
         return "ok"
 
     async def go():
-        first, queued = await asyncio.gather(server.com_tool(hang), server.com_tool(quick))
+        first, queued = await asyncio.gather(
+            server.com_tool(hang), server.com_tool(quick), return_exceptions=True
+        )
         started = time.monotonic()
-        refused = await server.com_tool(quick)
+        try:
+            refused = await server.com_tool(quick)
+        except server.SWError as e:
+            refused = e
         refused_in = time.monotonic() - started
         release.set()
         for _ in range(50):          # the queue reopens once SolidWorks answers
@@ -89,11 +94,19 @@ def test_stuck_command_times_out_and_later_ones_fail_fast(monkeypatch):
         return first, queued, refused, refused_in, await server.com_tool(quick)
 
     first, queued, refused, refused_in, after = asyncio.run(go())
-    assert first.startswith("ERROR:") and "no answer" in first
-    assert queued.startswith("ERROR:") and "still busy" in queued
-    assert refused.startswith("ERROR:") and "still busy" in refused
+    assert isinstance(first, server.SWError) and "no answer" in str(first)
+    assert isinstance(queued, server.SWError) and "still busy" in str(queued)
+    assert isinstance(refused, server.SWError) and "still busy" in str(refused)
     assert refused_in < 0.1
     assert after == "ok"
+
+
+def test_com_tool_raises_sw_error_on_failure():
+    def fail():
+        raise server.SWError("command failed")
+
+    with pytest.raises(server.SWError, match="command failed"):
+        asyncio.run(server.com_tool(fail))
 
 
 def test_save_paths_resolve_under_the_projects_folder(tmp_path, monkeypatch):

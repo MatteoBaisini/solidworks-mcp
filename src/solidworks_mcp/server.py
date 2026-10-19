@@ -637,22 +637,22 @@ def select_sketch_entity(doc: Any, x_mm: float, y_mm: float, point: bool = False
 
 
 # --------------------------------------------------------------------------- #
-# Wrapper: every tool runs its logic in the COM thread and always returns a
-# readable message (never a raw exception)
+# Wrapper: every tool runs its logic in the COM thread.
+# Exceptions are raised so that FastMCP sets isError: true on tool failures.
 # --------------------------------------------------------------------------- #
 async def com_tool(fn: Callable[..., Any], *args: Any) -> Any:
     try:
         return await run_com(fn, *args)
-    except SWError as e:
-        return f"ERROR: {e}"
+    except SWError:
+        raise
     except pywintypes.com_error as e:
         logger.exception("COM error")
         if _is_disconnected(e):
             _sw_cache["app"] = None
-        return f"COM ERROR from SolidWorks: {e}"
+        raise SWError(f"COM error from SolidWorks: {e}") from e
     except Exception as e:
         logger.exception("Unexpected error")
-        return f"ERROR: {type(e).__name__}: {e}"
+        raise SWError(f"{type(e).__name__}: {e}") from e
 
 
 def _is_disconnected(e: Exception) -> bool:
@@ -2143,7 +2143,7 @@ def _macro(python_code: str) -> str:
             exec(compile(python_code, "<macro>", "exec"), env)  # a single dict: no scoping problems
     except Exception:
         tb = traceback.format_exc(limit=3)
-        return f"ERROR in the macro:\n{tb}\nOutput before the error:\n{out.getvalue()}"
+        raise SWError(f"ERROR in the macro:\n{tb}\nOutput before the error:\n{out.getvalue()}")
     finally:
         try:
             d = sw.ActiveDoc

@@ -236,7 +236,7 @@ di SolidWorks indifferente, timeout invece di blocchi. Nessun concorrente espone
 
 Ogni task: annotazioni letterali, test, riga nella tabella Tools del README, audit a 0 FAIL.
 
-- [ ] **P1. Errori MCP veri.** Oggi `com_tool` restituisce stringhe `"ERROR: ..."`, che per il client
+- [x] **P1. Errori MCP veri.** Oggi `com_tool` restituisce stringhe `"ERROR: ..."`, che per il client
   sono risposte riuscite. Solleva l'eccezione (FastMCP la trasforma in risultato con `isError: true`)
   così l'agente capisce che il passo è fallito. Aggiorna i test che controllano il testo.
 - [ ] **P2. Verifica dopo ogni feature.** Dopo `extrude`, `cut_extrude`, `fillet` ecc. controlla gli
