@@ -3,6 +3,8 @@ import json
 import os
 import pytest
 
+import sys
+
 from solidworks_mcp import cli, server
 
 
@@ -11,6 +13,19 @@ def test_doctor_runs_and_reports(capsys):
     captured = capsys.readouterr().out
     assert "System Diagnostics (Doctor)" in captured
     assert "Operating System" in captured
+    if sys.platform == "win32":
+        assert "Process Elevation" in captured
+        assert ret in (0, 1)
+    else:
+        assert "Windows required" in captured
+        assert ret == 1
+
+
+def test_doctor_windows_simulation(capsys, monkeypatch):
+    monkeypatch.setattr(cli.sys, "platform", "win32")
+    monkeypatch.setattr(cli, "check_privileges", lambda: False)
+    ret = cli.run_doctor()
+    captured = capsys.readouterr().out
     assert "Process Elevation" in captured
     assert ret in (0, 1)
 
