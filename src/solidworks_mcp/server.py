@@ -2882,6 +2882,16 @@ def apply_read_only_mode() -> list[str]:
 def main(argv: list[str] | None = None) -> None:
     global CONFIG
     parser = argparse.ArgumentParser(prog="solidworks-mcp", description=__doc__.strip().splitlines()[0])
+    subparsers = parser.add_subparsers(dest="command")
+
+    # doctor subcommand
+    subparsers.add_parser("doctor", help="Check SolidWorks COM connectivity, permissions and default templates")
+
+    # install subcommand
+    install_parser = subparsers.add_parser("install", help="Configure MCP clients (Claude Desktop, Cursor, Windsurf)")
+    install_parser.add_argument("--client", choices=["claude", "cursor", "windsurf", "all"], default="claude",
+                                help="Target MCP client (default: claude)")
+
     parser.add_argument("--transport", choices=TRANSPORTS,
                         default=os.environ.get("SOLIDWORKS_MCP_TRANSPORT", "stdio"),
                         help="stdio (default) for MCP clients that start the server themselves; "
@@ -2891,6 +2901,13 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--config", help="path to the TOML configuration file")
     parser.add_argument("--version", action="version", version=f"solidworks-mcp {__version__}")
     args = parser.parse_args(argv)
+
+    if args.command == "doctor":
+        from solidworks_mcp.cli import run_doctor
+        sys.exit(run_doctor())
+    elif args.command == "install":
+        from solidworks_mcp.cli import run_install
+        sys.exit(run_install(client=args.client))
 
     try:
         CONFIG = load_config(args.config)

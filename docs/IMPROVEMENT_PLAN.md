@@ -262,7 +262,7 @@ Ogni task: annotazioni letterali, test, riga nella tabella Tools del README, aud
   `insert_model_dimensions`, export PDF/DXF.
 - [x] **P10. Configurazioni.** `list_configurations` (READ), `activate_configuration`, `add_configuration`.
 - [x] **P11. Lamiera.** `base_flange`, `edge_flange`, `export_flat_pattern` (DXF).
-- [ ] **P12. CLI di supporto.** `solidworks-mcp doctor` (SolidWorks raggiungibile, stessi privilegi,
+- [x] **P12. CLI di supporto.** `solidworks-mcp doctor` (SolidWorks raggiungibile, stessi privilegi,
   modello di parte predefinito impostato, versione) e `solidworks-mcp install --client ...` che scrive
   la configurazione con backup.
 - [ ] **P13. Test di integrazione.** Marker `solidworks`: crea una piastra 100×50×10 con foro Ø10 e

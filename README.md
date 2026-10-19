@@ -49,6 +49,17 @@ From a clone, run `install.bat` (it creates `.venv` and installs the server in i
 
 SolidWorks and the server must run with the same privileges: do not run either one as administrator.
 
+### CLI Tools (`doctor` & `install`)
+
+- **Diagnostics (`doctor`)**: verify SolidWorks COM connectivity, permissions, and default templates:
+  ```bash
+  solidworks-mcp doctor
+  ```
+- **Automated Client Setup (`install`)**: configure Claude Desktop, Cursor, or Windsurf with automatic backups of existing configurations:
+  ```bash
+  solidworks-mcp install --client claude   # or cursor, windsurf, all
+  ```
+
 ## Tools
 
 Every tool declares standard MCP annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`), allowing clients to automatically authorize safe read and inspection calls while prompting for changes.
