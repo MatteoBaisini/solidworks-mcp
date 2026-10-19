@@ -34,7 +34,8 @@ import tempfile
 import time
 import traceback
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Callable, Literal, TypedDict
+from typing import Annotated, Any, Callable, Literal, TypedDict
+from pydantic import Field
 
 
 class BoundingBox(TypedDict):
@@ -1068,8 +1069,9 @@ async def end_sketch() -> str:
 
 @mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
                        "idempotentHint": False, "openWorldHint": False})
-async def sketch_rectangle(width_mm: float, height_mm: float, center_x_mm: float = 0.0,
-                           center_y_mm: float = 0.0) -> str:
+async def sketch_rectangle(width_mm: Annotated[float, Field(gt=0, description="Rectangle width in mm")],
+                           height_mm: Annotated[float, Field(gt=0, description="Rectangle height in mm")],
+                           center_x_mm: float = 0.0, center_y_mm: float = 0.0) -> str:
     """Draws a rectangle in the open sketch, given centre and size (mm)."""
     def work():
         if width_mm <= 0 or height_mm <= 0:
@@ -1085,7 +1087,8 @@ async def sketch_rectangle(width_mm: float, height_mm: float, center_x_mm: float
 
 @mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
                        "idempotentHint": False, "openWorldHint": False})
-async def sketch_circle(diameter_mm: float, center_x_mm: float = 0.0, center_y_mm: float = 0.0) -> str:
+async def sketch_circle(diameter_mm: Annotated[float, Field(gt=0, description="Circle diameter in mm")],
+                        center_x_mm: float = 0.0, center_y_mm: float = 0.0) -> str:
     """Draws a circle in the open sketch, given centre and DIAMETER (mm)."""
     def work():
         if diameter_mm <= 0:
@@ -1118,8 +1121,9 @@ async def sketch_line(x1_mm: float, y1_mm: float, x2_mm: float, y2_mm: float,
 
 @mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
                        "idempotentHint": False, "openWorldHint": False})
-async def sketch_polygon(sides: int, circumscribed_diameter_mm: float, center_x_mm: float = 0.0,
-                         center_y_mm: float = 0.0, rotation_deg: float = 0.0) -> str:
+async def sketch_polygon(sides: Annotated[int, Field(ge=3, description="Number of sides (>= 3)")],
+                         circumscribed_diameter_mm: Annotated[float, Field(gt=0, description="Inscribed circle diameter in mm")],
+                         center_x_mm: float = 0.0, center_y_mm: float = 0.0, rotation_deg: float = 0.0) -> str:
     """Draws a regular polygon (e.g. hexagon: sides=6) inscribed in a circle of the given diameter (mm)."""
     def work():
         if sides < 3:
@@ -1152,7 +1156,8 @@ async def sketch_arc(center_x_mm: float, center_y_mm: float, start_x_mm: float, 
 
 @mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
                        "idempotentHint": False, "openWorldHint": False})
-async def sketch_slot(x1_mm: float, y1_mm: float, x2_mm: float, y2_mm: float, width_mm: float) -> str:
+async def sketch_slot(x1_mm: float, y1_mm: float, x2_mm: float, y2_mm: float,
+                      width_mm: Annotated[float, Field(gt=0, description="Slot width/diameter in mm")]) -> str:
     """Draws a straight slot (two half circles joined by lines) in the open sketch, given the
     centres of its two ends and its width (mm)."""
     def work():
@@ -1171,8 +1176,9 @@ async def sketch_slot(x1_mm: float, y1_mm: float, x2_mm: float, y2_mm: float, wi
 
 @mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
                        "idempotentHint": False, "openWorldHint": False})
-async def sketch_ellipse(major_diameter_mm: float, minor_diameter_mm: float, center_x_mm: float = 0.0,
-                         center_y_mm: float = 0.0, rotation_deg: float = 0.0) -> str:
+async def sketch_ellipse(major_diameter_mm: Annotated[float, Field(gt=0, description="Major diameter in mm")],
+                         minor_diameter_mm: Annotated[float, Field(gt=0, description="Minor diameter in mm")],
+                         center_x_mm: float = 0.0, center_y_mm: float = 0.0, rotation_deg: float = 0.0) -> str:
     """Draws an ellipse in the open sketch, given its two diameters (mm). rotation_deg turns the
     major axis counterclockwise from the sketch X axis."""
     def work():
@@ -1207,7 +1213,8 @@ async def sketch_spline(points: list[list[float]]) -> str:
 
 @mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
                        "idempotentHint": False, "openWorldHint": False})
-async def sketch_fillet(radius_mm: float, corner_x_mm: float, corner_y_mm: float) -> str:
+async def sketch_fillet(radius_mm: Annotated[float, Field(gt=0, description="Fillet radius in mm")],
+                        corner_x_mm: float, corner_y_mm: float) -> str:
     """Rounds the corner of the open sketch at (x, y) (the point where two entities meet) with the
     given radius (mm)."""
     def work():
@@ -1227,8 +1234,8 @@ async def sketch_fillet(radius_mm: float, corner_x_mm: float, corner_y_mm: float
 
 @mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
                        "idempotentHint": False, "openWorldHint": False})
-async def sketch_offset(distance_mm: float, x_mm: float, y_mm: float, both_sides: bool = False,
-                        reverse: bool = False) -> str:
+async def sketch_offset(distance_mm: Annotated[float, Field(gt=0, description="Offset distance in mm")],
+                        x_mm: float, y_mm: float, both_sides: bool = False, reverse: bool = False) -> str:
     """Offsets the chain of connected sketch entities passing through (x, y) by distance_mm.
     reverse=True offsets to the other side; both_sides=True offsets to both sides."""
     def work():
@@ -1403,11 +1410,14 @@ def extrusion_ends(depth_mm: float, end_condition: str, depth2_mm: float,
 
 @mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
                        "idempotentHint": False, "openWorldHint": False})
-async def extrude(depth_mm: float = 0.0,
+async def extrude(depth_mm: Annotated[float, Field(ge=0, description="Extrusion depth in mm (blind or midplane)")] = 0.0,
                   end_condition: Literal["blind", "midplane", "through_all", "up_to_surface"] = "blind",
-                  reverse: bool = False, depth2_mm: float = 0.0, draft_angle_deg: float = 0.0,
+                  reverse: bool = False,
+                  depth2_mm: Annotated[float, Field(ge=0, description="Second direction depth in mm")] = 0.0,
+                  draft_angle_deg: Annotated[float, Field(ge=0, lt=90, description="Draft angle in degrees (0 to <90)")] = 0.0,
                   draft_outward: bool = False, up_to_point: list[float] | None = None,
-                  thin_wall_mm: float = 0.0, merge: bool = True) -> str:
+                  thin_wall_mm: Annotated[float, Field(ge=0, description="Thin wall thickness in mm (0 for solid)")] = 0.0,
+                  merge: bool = True) -> str:
     """Extrudes the last sketch as a solid (closing it automatically if open).
 
     end_condition: blind = depth_mm on one side; midplane = depth_mm split on both sides;
@@ -1447,8 +1457,11 @@ async def extrude(depth_mm: float = 0.0,
 
 @mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
                        "idempotentHint": False, "openWorldHint": False})
-async def cut_extrude(depth_mm: float = 0.0, through_all: bool = False, reverse: bool = False,
-                      flip_side: bool = False, depth2_mm: float = 0.0, draft_angle_deg: float = 0.0,
+async def cut_extrude(depth_mm: Annotated[float, Field(ge=0, description="Cut depth in mm (blind)")] = 0.0,
+                      through_all: bool = False, reverse: bool = False,
+                      flip_side: bool = False,
+                      depth2_mm: Annotated[float, Field(ge=0, description="Second direction cut depth in mm")] = 0.0,
+                      draft_angle_deg: Annotated[float, Field(ge=0, lt=90, description="Draft angle in degrees (0 to <90)")] = 0.0,
                       draft_outward: bool = False, up_to_point: list[float] | None = None) -> str:
     """Extruded cut (holes, pockets) with the last sketch. through_all=True goes right through
     (depth_mm ignored). reverse flips the direction; flip_side removes the material OUTSIDE the profile.
@@ -1483,7 +1496,8 @@ async def cut_extrude(depth_mm: float = 0.0, through_all: bool = False, reverse:
 
 @mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
                        "idempotentHint": False, "openWorldHint": False})
-async def revolve(angle_deg: float = 360.0, cut: bool = False) -> str:
+async def revolve(angle_deg: Annotated[float, Field(gt=0, le=360, description="Revolve angle in degrees (0 < angle <= 360)")] = 360.0,
+                  cut: bool = False) -> str:
     """Revolves the last sketch around the construction line it contains
     (create it with sketch_line construction=True). cut=True removes material instead of adding it."""
     def work():
@@ -1505,8 +1519,10 @@ async def revolve(angle_deg: float = 360.0, cut: bool = False) -> str:
 
 @mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
                        "idempotentHint": False, "openWorldHint": False})
-async def rib(thickness_mm: float, direction: Literal["parallel", "normal"] = "parallel",
-              one_side: bool = False, flip_material: bool = False, draft_angle_deg: float = 0.0) -> str:
+async def rib(thickness_mm: Annotated[float, Field(gt=0, description="Rib thickness in mm")],
+              direction: Literal["parallel", "normal"] = "parallel",
+              one_side: bool = False, flip_material: bool = False,
+              draft_angle_deg: Annotated[float, Field(ge=0, lt=90, description="Draft angle in degrees (0 to <90)")] = 0.0) -> str:
     """Rib from the last sketch: usually an open line between walls of the part, drawn on a plane
     through the middle of the rib. thickness_mm is the total thickness, centred on the sketch
     unless one_side=True. direction: parallel = material grows in the sketch plane, normal =
@@ -1529,7 +1545,8 @@ async def rib(thickness_mm: float, direction: Literal["parallel", "normal"] = "p
 
 @mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
                        "idempotentHint": False, "openWorldHint": False})
-async def sweep(path_sketch: str, profile_sketch: str = "", circle_diameter_mm: float = 0.0,
+async def sweep(path_sketch: str, profile_sketch: str = "",
+                circle_diameter_mm: Annotated[float, Field(ge=0, description="Diameter in mm for circular sweep profile (0 if using profile_sketch)")] = 0.0,
                 cut: bool = False) -> str:
     """Sweeps a profile along a path (pipes, springs, handles, grooves).
 
@@ -1591,7 +1608,8 @@ async def loft(profile_sketches: list[str], guide_sketches: list[str] | None = N
 
 @mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
                        "idempotentHint": False, "openWorldHint": False})
-async def create_plane(offset_mm: float, reference: str = "front", face_point: list[float] | None = None,
+async def create_plane(offset_mm: Annotated[float, Field(gt=0, description="Offset distance in mm")],
+                       reference: str = "front", face_point: list[float] | None = None,
                        flip: bool = False) -> str:
     """Creates a reference plane parallel to another one, offset_mm away (e.g. for loft profiles).
     reference: "front", "top", "right" or the name of a plane; or give face_point ([x, y, z] mm on a
@@ -1629,7 +1647,8 @@ def select_edges_and_faces(doc: Any, edge_points: list[list[float]] | None,
 
 @mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
                        "idempotentHint": False, "openWorldHint": False})
-async def fillet(radius_mm: float, edge_points: list[list[float]] | None = None,
+async def fillet(radius_mm: Annotated[float, Field(gt=0, description="Fillet radius in mm")],
+                 edge_points: list[list[float]] | None = None,
                  face_points: list[list[float]] | None = None) -> str:
     """Rounds edges with a constant radius. edge_points: a point on each edge ([x, y, z] in mm,
     model coordinates); face_points: a point on each face whose edges are all rounded. Edges
@@ -1651,9 +1670,12 @@ async def fillet(radius_mm: float, edge_points: list[list[float]] | None = None,
 
 @mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
                        "idempotentHint": False, "openWorldHint": False})
-async def chamfer(distance_mm: float, edge_points: list[list[float]] | None = None,
-                  face_points: list[list[float]] | None = None, angle_deg: float = 45.0,
-                  distance2_mm: float = 0.0, flip: bool = False) -> str:
+async def chamfer(distance_mm: Annotated[float, Field(gt=0, description="Chamfer distance in mm")],
+                  edge_points: list[list[float]] | None = None,
+                  face_points: list[list[float]] | None = None,
+                  angle_deg: Annotated[float, Field(gt=0, lt=90, description="Chamfer angle in degrees (0 < angle < 90)")] = 45.0,
+                  distance2_mm: Annotated[float, Field(ge=0, description="Second chamfer distance in mm")] = 0.0,
+                  flip: bool = False) -> str:
     """Bevels edges. edge_points / face_points as for fillet.
     Default: distance_mm at angle_deg (45 = equal sides). With distance2_mm > 0 the two sides are
     distance_mm and distance2_mm (angle ignored); flip swaps the sides of an unequal chamfer."""
@@ -1674,7 +1696,8 @@ async def chamfer(distance_mm: float, edge_points: list[list[float]] | None = No
 
 @mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
                        "idempotentHint": False, "openWorldHint": False})
-async def shell(thickness_mm: float, open_face_points: list[list[float]] | None = None,
+async def shell(thickness_mm: Annotated[float, Field(gt=0, description="Wall thickness in mm")],
+                open_face_points: list[list[float]] | None = None,
                 outward: bool = False) -> str:
     """Hollows the part leaving walls thickness_mm thick. open_face_points: a point on each face to
     remove ([x, y, z] in mm), e.g. the top of a box; none gives a closed hollow part.
@@ -1697,9 +1720,13 @@ async def shell(thickness_mm: float, open_face_points: list[list[float]] | None 
 
 @mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
                        "idempotentHint": False, "openWorldHint": False})
-async def linear_pattern(features: list[str], direction: Literal["x", "y", "z"], count: int, spacing_mm: float,
-                         reverse: bool = False, direction2: Literal["", "x", "y", "z"] = "", count2: int = 1,
-                         spacing2_mm: float = 0.0, reverse2: bool = False) -> str:
+async def linear_pattern(features: list[str], direction: Literal["x", "y", "z"],
+                         count: Annotated[int, Field(ge=2, description="Number of copies along direction 1 (including original, >= 2)")],
+                         spacing_mm: Annotated[float, Field(gt=0, description="Spacing between copies in mm")],
+                         reverse: bool = False, direction2: Literal["", "x", "y", "z"] = "",
+                         count2: Annotated[int, Field(ge=1, description="Number of copies along direction 2 (>= 1)")] = 1,
+                         spacing2_mm: Annotated[float, Field(ge=0, description="Spacing between copies in direction 2 in mm")] = 0.0,
+                         reverse2: bool = False) -> str:
     """Repeats features (names from get_feature_tree) in a row along a model axis: count copies in
     total (original included), spacing_mm apart, towards + (or - with reverse).
     direction2/count2/spacing2_mm add a second direction for a grid."""
@@ -1729,8 +1756,11 @@ async def linear_pattern(features: list[str], direction: Literal["x", "y", "z"],
 
 @mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
                        "idempotentHint": False, "openWorldHint": False})
-async def circular_pattern(features: list[str], count: int, axis: Literal["x", "y", "z", "edge"] = "z",
-                           axis_edge_point: list[float] | None = None, angle_deg: float = 360.0,
+async def circular_pattern(features: list[str],
+                           count: Annotated[int, Field(ge=2, description="Number of copies (including original, >= 2)")],
+                           axis: Literal["x", "y", "z", "edge"] = "z",
+                           axis_edge_point: list[float] | None = None,
+                           angle_deg: Annotated[float, Field(gt=0, le=360, description="Total angle in degrees (0 < angle <= 360)")] = 360.0,
                            reverse: bool = False) -> str:
     """Repeats features (names from get_feature_tree) around an axis: count copies in total
     (original included), spread evenly over angle_deg.
@@ -1862,11 +1892,16 @@ def _cut_circles(doc: Any, face_point: list[float], centers: list[list[float]], 
 
 @mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
                        "idempotentHint": False, "openWorldHint": False})
-async def hole(centers: list[list[float]], size: str = "", diameter_mm: float = 0.0,
-               fit: Literal["close", "normal", "loose", "tapped"] = "normal", depth_mm: float = 0.0,
-               through_all: bool = False, style: Literal["simple", "counterbore", "countersink"] = "simple",
-               counterbore_diameter_mm: float = 0.0, counterbore_depth_mm: float = 0.0,
-               countersink_diameter_mm: float = 0.0, countersink_angle_deg: float = 90.0) -> str:
+async def hole(centers: list[list[float]], size: str = "",
+               diameter_mm: Annotated[float, Field(ge=0, description="Hole diameter in mm (0 if using metric size)")] = 0.0,
+               fit: Literal["close", "normal", "loose", "tapped"] = "normal",
+               depth_mm: Annotated[float, Field(ge=0, description="Hole depth in mm (0 if through_all)")] = 0.0,
+               through_all: bool = False,
+               style: Literal["simple", "counterbore", "countersink"] = "simple",
+               counterbore_diameter_mm: Annotated[float, Field(ge=0, description="Counterbore diameter in mm")] = 0.0,
+               counterbore_depth_mm: Annotated[float, Field(ge=0, description="Counterbore depth in mm")] = 0.0,
+               countersink_diameter_mm: Annotated[float, Field(ge=0, description="Countersink diameter in mm")] = 0.0,
+               countersink_angle_deg: Annotated[float, Field(gt=0, lt=180, description="Countersink angle in degrees (0 < angle < 180)")] = 90.0) -> str:
     """Drills round holes into a planar face, perpendicular to it.
 
     centers: the hole centres [[x, y, z], ...] in mm, model coordinates, all on the SAME face

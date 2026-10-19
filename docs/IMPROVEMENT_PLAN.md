@@ -245,7 +245,7 @@ Ogni task: annotazioni letterali, test, riga nella tabella Tools del README, aud
 - [x] **P3. Output strutturato.** Per `get_bounding_box`, `get_mass_properties`, `measure`,
   `get_dimensions` restituisci un `TypedDict`/modello Pydantic: FastMCP genera `outputSchema` e
   l'agente legge numeri, non testo da interpretare.
-- [ ] **P4. Input validati.** Usa `Annotated[float, Field(gt=0, description="...")]` per diametri,
+- [x] **P4. Input validati.** Usa `Annotated[float, Field(gt=0, description="...")]` per diametri,
   profondità, spessori, numero di lati. Schemi più precisi = meno chiamate sbagliate (Slacker perde
   un controllo qualità per questo).
 - [ ] **P5. Salvataggi sicuri.** `save_document` con percorso assoluto può sovrascrivere qualsiasi

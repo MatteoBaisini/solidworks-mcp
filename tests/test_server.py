@@ -269,3 +269,14 @@ def test_get_dimensions_returns_structured_dict(monkeypatch):
     assert res["dimensions"][0]["name"] == "D1@Sketch1"
     assert res["dimensions"][0]["value"] == 50.0
     assert res["dimensions"][0]["unit"] == "mm"
+
+
+def test_input_validation_schema():
+    tools = {t.name: t for t in asyncio.run(server.mcp.list_tools())}
+    circle_props = tools["sketch_circle"].inputSchema["properties"]
+    assert circle_props["diameter_mm"].get("exclusiveMinimum") == 0
+    assert "description" in circle_props["diameter_mm"]
+
+    pattern_props = tools["linear_pattern"].inputSchema["properties"]
+    assert pattern_props["count"].get("minimum") == 2
+    assert pattern_props["spacing_mm"].get("exclusiveMinimum") == 0
