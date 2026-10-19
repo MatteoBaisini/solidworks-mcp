@@ -21,7 +21,7 @@ ENV_ALLOW_MACRO = "SOLIDWORKS_MCP_ALLOW_MACRO"
 ENV_READ_ONLY = "SOLIDWORKS_MCP_READ_ONLY"
 LOCAL_NAME = "solidworks-mcp.toml"
 
-EXPORT_FORMATS = ("step", "stp", "iges", "igs", "x_t", "stl", "3mf", "pdf", "png")
+EXPORT_FORMATS = ("step", "stp", "iges", "igs", "x_t", "stl", "3mf", "pdf", "png", "dxf", "dwg")
 
 
 class ConfigError(ValueError):

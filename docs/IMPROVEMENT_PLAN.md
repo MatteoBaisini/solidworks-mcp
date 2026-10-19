@@ -258,7 +258,7 @@ Ogni task: annotazioni letterali, test, riga nella tabella Tools del README, aud
   utile per revisioni di modelli altrui.
 - [x] **P8. Assiemi.** `new_assembly`, `insert_component`, `add_mate` (coincident, concentric,
   parallel, distance, angle), `check_interference` (READ). È la lacuna più grande rispetto a 0xFFD e Slacker.
-- [ ] **P9. Tavole 2D.** `new_drawing` dal pezzo attivo, tre viste standard + isometrica,
+- [x] **P9. Tavole 2D.** `new_drawing` dal pezzo attivo, tre viste standard + isometrica,
   `insert_model_dimensions`, export PDF/DXF.
 - [ ] **P10. Configurazioni.** `list_configurations` (READ), `activate_configuration`, `add_configuration`.
 - [ ] **P11. Lamiera.** `base_flange`, `edge_flange`, `export_flat_pattern` (DXF).

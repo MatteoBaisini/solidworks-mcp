@@ -20,6 +20,7 @@ EXPECTED_TOOLS = {
     "set_dimension", "suppress_feature", "get_equations", "add_equation", "delete_equation",
     "get_custom_properties", "set_custom_property", "measure", "undo", "delete_feature", "zoom_to_fit",
     "new_assembly", "insert_component", "add_mate", "check_interference",
+    "new_drawing", "insert_model_dimensions",
 }
 
 
@@ -449,5 +450,39 @@ def test_check_interference(monkeypatch):
     res = asyncio.run(server.check_interference())
     assert "Found 1 interference(s)" in res
     assert "5000.00 mm³" in res
+
+
+def test_new_drawing(monkeypatch):
+    class FakePartDoc:
+        def GetType(self): return server.SW_DOC_PART
+        def GetPathName(self): return "C:/projects/part1.SLDPRT"
+
+    class FakeDrawDoc:
+        def GetTitle(self): return "Drawing1"
+        def Create3rdAngleViews2(self, path): return True
+        def CreateDrawViewFromModelView3(self, path, name, x, y, z): return None
+
+    class FakeSW:
+        ActiveDoc = FakePartDoc()
+        def GetUserPreferenceStringValue(self, pref): return "C:/templates/drawing.drwdot"
+        def NewDocument(self, tmpl, *args): return FakeDrawDoc()
+
+    monkeypatch.setattr(server, "get_sw", lambda: FakeSW())
+    monkeypatch.setattr(server.os.path, "isfile", lambda p: True)
+    monkeypatch.setattr(server, "rebuild", lambda doc: None)
+    res = asyncio.run(server.new_drawing())
+    assert "New drawing 'Drawing1' created from 'part1.SLDPRT'" in res
+
+
+def test_insert_model_dimensions(monkeypatch):
+    class FakeDrawDoc:
+        def InsertModelAnnotations3(self, opt, types, all_views, dup, hidden, sketch_pos):
+            return ["dim1", "dim2", "dim3"]
+
+    monkeypatch.setattr(server, "active_doc", lambda *args: FakeDrawDoc())
+    monkeypatch.setattr(server, "rebuild", lambda doc: None)
+    res = asyncio.run(server.insert_model_dimensions())
+    assert "Inserted 3 model dimension(s)" in res
+
 
 

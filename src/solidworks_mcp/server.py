@@ -1187,6 +1187,66 @@ async def check_interference() -> str:
     return await com_tool(work)
 
 
+# -------------------------------- Drawings --------------------------------- #
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
+                       "idempotentHint": False, "openWorldHint": False})
+async def new_drawing(template_path: str = "") -> str:
+    """Creates a new 2D drawing from the currently active part or assembly document.
+    Generates 3 standard 3rd-angle projection views (Front, Top, Right) and an Isometric view."""
+    def work():
+        sw = get_sw()
+        active = sw.ActiveDoc
+        if active is None:
+            raise SWError("Open or create a part or assembly first before creating a drawing.")
+        model_type = call(active, "GetType")
+        if model_type not in (SW_DOC_PART, SW_DOC_ASSEMBLY):
+            raise SWError("The active document must be a Part or Assembly.")
+        model_path = call(active, "GetPathName")
+        if not model_path:
+            raise SWError("Save the active part or assembly first (save_document) before creating a drawing.")
+        template = template_path or sw.GetUserPreferenceStringValue(SW_DEFAULT_TEMPLATE_DRAWING)
+        if not template or not os.path.isfile(template):
+            try:
+                template = sw.GetDocumentTemplate(SW_DOC_DRAWING, "", 0, 0, 0)
+            except Exception:
+                pass
+        if not template or not os.path.isfile(template):
+            raise SWError("Default drawing template not set or not found "
+                          "(SolidWorks > Options > File Locations / Default Templates).")
+        draw_doc = sw.NewDocument(template, 0, 0, 0)
+        if draw_doc is None:
+            raise SWError("SolidWorks did not create the drawing.")
+        try:
+            draw_doc.Create3rdAngleViews2(model_path)
+        except Exception:
+            pass
+        try:
+            # Isometric view placed at upper right (approx 0.22m, 0.22m)
+            draw_doc.CreateDrawViewFromModelView3(model_path, "*Isometric", 0.22, 0.22, 0.0)
+        except Exception:
+            pass
+        rebuild(draw_doc)
+        title = call(draw_doc, "GetTitle")
+        return f"New drawing '{title}' created from '{os.path.basename(model_path)}' with standard orthogonal and isometric views."
+    return await com_tool(work)
+
+
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
+                       "idempotentHint": False, "openWorldHint": False})
+async def insert_model_dimensions() -> str:
+    """Inserts model dimensions marked for drawing across all views in the active 2D drawing."""
+    def work():
+        doc = active_doc(SW_DOC_DRAWING)
+        try:
+            annotations = doc.InsertModelAnnotations3(0, 1, True, False, False, False)
+        except (pywintypes.com_error, AttributeError) as e:
+            raise SWError(f"Could not insert model dimensions: {e}") from e
+        count = len(annotations) if annotations else 0
+        rebuild(doc)
+        return f"Inserted {count} model dimension(s) into the drawing."
+    return await com_tool(work)
+
+
 # -------------------------------- Selection -------------------------------- #
 @mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
                        "idempotentHint": True, "openWorldHint": False})

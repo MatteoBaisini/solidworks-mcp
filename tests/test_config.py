@@ -81,7 +81,7 @@ def test_env_overrides_macro(tmp_path, monkeypatch):
     "[nope]\nx = 1\n",                          # unknown section
     "[export]\nformat = ['step']\n",            # unknown key
     "[export]\nformats = 'step'\n",             # wrong type
-    "[export]\nformats = ['dwg']\n",            # unsupported format
+    "[export]\nformats = ['obj']\n",            # unsupported format
     "[solidworks]\nauto_launch = 1\n",          # int where a bool is expected
     "[solidworks]\ncommand_timeout_s = true\n", # bool where a number is expected
     "[solidworks]\ncommand_timeout_s = 0\n",    # non-positive timeout
