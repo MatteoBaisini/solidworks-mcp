@@ -22,6 +22,7 @@ EXPECTED_TOOLS = {
     "new_assembly", "insert_component", "add_mate", "check_interference",
     "new_drawing", "insert_model_dimensions",
     "list_configurations", "activate_configuration", "add_configuration",
+    "base_flange", "edge_flange", "export_flat_pattern",
 }
 
 
@@ -541,6 +542,67 @@ def test_configurations(monkeypatch):
     # Duplicate config
     with pytest.raises(server.SWError, match="already exists"):
         asyncio.run(server.add_configuration("HeavyDuty"))
+
+
+def test_sheet_metal(monkeypatch, tmp_path):
+    class FakeFeature:
+        def __init__(self, name): self._name = name
+        def Name(self): return self._name
+        def GetErrorCode2(self, *args): return 0
+
+    class FakeFeatureManager:
+        def InsertSheetMetalBaseFlange2(self, *args):
+            return FakeFeature("BaseFlange1")
+        def InsertSheetMetalEdgeFlange2(self, *args):
+            return FakeFeature("EdgeFlange1")
+
+    class FakeEdge:
+        pass
+
+    class FakeSketch:
+        pass
+
+    class FakeSelMgr:
+        def GetSelectedObjectCount2(self, mark): return 1
+        def GetSelectedObject6(self, idx, mark): return FakeEdge()
+
+    class FakePartDoc:
+        def __init__(self):
+            self.FeatureManager = FakeFeatureManager()
+            self.SelectionManager = FakeSelMgr()
+            self._path = str(tmp_path / "sheet_part.SLDPRT")
+        def GetType(self): return server.SW_DOC_PART
+        def GetPathName(self): return self._path
+        def GetTitle(self): return "sheet_part"
+        def ClearSelection2(self, all_obj): pass
+        def FirstFeature(self): return None
+        def InsertSketchForEdgeFlange(self, edge, angle, rev): return FakeSketch()
+        def InsertSketch2(self, update): pass
+        def ExportFlatPatternView(self, filepath, options):
+            with open(filepath, "w") as f:
+                f.write("FAKE DXF CONTENT")
+            return True
+
+    fake_doc = FakePartDoc()
+    monkeypatch.setattr(server, "active_doc", lambda *args: fake_doc)
+    monkeypatch.setattr(server, "close_sketch_and_select_it", lambda doc: "Sketch1")
+    monkeypatch.setattr(server, "leave_sketch", lambda doc: None)
+    monkeypatch.setattr(server, "rebuild", lambda doc: None)
+
+    # 1. base_flange
+    res = asyncio.run(server.base_flange(thickness_mm=2.0, depth_mm=50.0, bend_radius_mm=1.5))
+    assert "Sheet metal base flange 'BaseFlange1' created from 'Sketch1'" in res
+
+    # 2. edge_flange
+    res = asyncio.run(server.edge_flange(length_mm=25.0, angle_deg=90.0))
+    assert "Edge flange 'EdgeFlange1' created" in res
+
+    # 3. export_flat_pattern
+    out_dxf = str(tmp_path / "custom_flat.dxf")
+    res = asyncio.run(server.export_flat_pattern(path=out_dxf))
+    assert f"Exported flat pattern to {os.path.normpath(out_dxf)}" in res
+    assert os.path.exists(out_dxf)
+
 
 
 

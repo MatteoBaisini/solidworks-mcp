@@ -65,6 +65,7 @@ Every tool declares standard MCP annotations (`readOnlyHint`, `destructiveHint`,
 | Sketch constraints | `fully_define_sketch`, `add_sketch_dimension`, `add_sketch_relation` |
 | Features | `extrude`, `cut_extrude`, `revolve`, `rib`, `sweep`, `loft`, `create_plane` |
 | Finishing | `fillet`, `chamfer`, `shell`, `hole` |
+| Sheet Metal | `base_flange`, `edge_flange`, `export_flat_pattern` |
 | Patterns | `linear_pattern`, `circular_pattern`, `mirror` |
 | Material | `list_materials`, `set_material` |
 | Parameters | `get_dimensions`, `set_dimension`, `suppress_feature`, `get_equations`, `add_equation`, `delete_equation`, `get_custom_properties`, `set_custom_property` |

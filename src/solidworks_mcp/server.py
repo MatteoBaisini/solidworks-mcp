@@ -2287,6 +2287,156 @@ async def hole(centers: list[list[float]], size: str = "",
     return await com_tool(work)
 
 
+# ------------------------------ Sheet Metal ------------------------------- #
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
+                       "idempotentHint": False, "openWorldHint": False})
+async def base_flange(thickness_mm: Annotated[float, Field(gt=0, description="Sheet metal thickness in mm")] = 1.5,
+                      depth_mm: Annotated[float, Field(gt=0, description="Extrusion depth in mm for open sketch profiles")] = 100.0,
+                      bend_radius_mm: Annotated[float, Field(gt=0, description="Internal bend radius in mm")] = 1.0,
+                      reverse_thickness: bool = False) -> str:
+    """Creates a sheet metal base flange / tab from the open or selected sketch."""
+    def work():
+        if thickness_mm <= 0 or depth_mm <= 0 or bend_radius_mm <= 0:
+            raise SWError("Thickness, depth and bend radius must all be positive.")
+        doc = active_doc(SW_DOC_PART)
+        sketch_name = close_sketch_and_select_it(doc)
+        fm = doc.FeatureManager
+        before = last_feature_name(doc)
+        try:
+            feat = fm.InsertSheetMetalBaseFlange2(
+                thickness_mm * MM,
+                reverse_thickness,
+                bend_radius_mm * MM,
+                depth_mm * MM,
+                0.0,
+                False,
+                0, 0, 0,
+                None,
+                True,
+                1, 0.0, 0.0, 0.5,
+                False, False, False, True
+            )
+        except Exception:
+            feat = None
+        if feat is None:
+            feat = new_feature(doc, before, f"Base flange from '{sketch_name}' failed.")
+        name = finish_feature(doc, feat, f"Base flange from '{sketch_name}' failed.")
+        return f"Sheet metal base flange '{name}' created from '{sketch_name}' (thickness {thickness_mm} mm, bend radius {bend_radius_mm} mm)."
+    return await com_tool(work)
+
+
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
+                       "idempotentHint": False, "openWorldHint": False})
+async def edge_flange(length_mm: Annotated[float, Field(gt=0, description="Flange length in mm")],
+                      angle_deg: Annotated[float, Field(gt=0, lt=180, description="Flange bend angle in degrees (default 90)")] = 90.0,
+                      edge_point_mm: list[float] | None = None,
+                      radius_mm: Annotated[float, Field(ge=0, description="Bend radius in mm; 0 uses part default")] = 0.0) -> str:
+    """Creates a sheet metal edge flange on the selected or indicated edge."""
+    def work():
+        if length_mm <= 0 or not 0 < angle_deg < 180:
+            raise SWError("Flange length must be positive and angle between 0 and 180 degrees.")
+        doc = active_doc(SW_DOC_PART)
+        leave_sketch(doc)
+        if edge_point_mm:
+            doc.ClearSelection2(True)
+            select_at(doc, "EDGE", edge_point_mm)
+        sel_mgr = doc.SelectionManager
+        if sel_mgr.GetSelectedObjectCount2(-1) == 0:
+            raise SWError("No edge selected. Select an edge first (select_edge_at_point) or pass edge_point_mm.")
+        edge = sel_mgr.GetSelectedObject6(1, -1)
+        if edge is None:
+            raise SWError("Could not retrieve selected edge.")
+        ang_rad = angle_deg * DEG
+        try:
+            sketch = doc.InsertSketchForEdgeFlange(edge, ang_rad, False)
+        except Exception as e:
+            raise SWError(f"Failed to insert sketch for edge flange on the selected edge: {e}") from e
+        if sketch is None:
+            raise SWError("Failed to insert sketch for edge flange on the selected edge.")
+        try:
+            doc.InsertSketch2(True)
+        except Exception:
+            pass
+        use_default_rad = (radius_mm <= 0)
+        options = (1 if use_default_rad else 0) | 2
+        r_val = 0.0 if use_default_rad else radius_mm * MM
+        fm = doc.FeatureManager
+        before = last_feature_name(doc)
+        try:
+            feat = fm.InsertSheetMetalEdgeFlange2(
+                [edge], [sketch], options, ang_rad, r_val,
+                1, length_mm * MM, 0, 0.0, 0.0, 0.0, 0, None
+            )
+        except Exception:
+            feat = None
+        if feat is None:
+            feat = new_feature(doc, before, "Edge flange failed (check edge geometry and angle).")
+        name = finish_feature(doc, feat, "Edge flange failed.")
+        return f"Edge flange '{name}' created (length {length_mm} mm, angle {angle_deg} deg)."
+    return await com_tool(work)
+
+
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": True,
+                       "idempotentHint": True, "openWorldHint": False})
+async def export_flat_pattern(path: str = "", remove_bends: bool = False) -> str:
+    """Exports the flat pattern of the active sheet metal part to a DXF file.
+    Existing files with the same name are replaced.
+    path: absolute path or relative filename for the DXF export. Omit to export next to the part."""
+    def work():
+        doc = active_doc(SW_DOC_PART)
+        doc_path = call(doc, "GetPathName")
+        stem = os.path.splitext(os.path.basename(doc_path) if doc_path else call(doc, "GetTitle"))[0]
+        target = path.strip() if path else ""
+        if not target:
+            if not doc_path:
+                if CONFIG.projects_directory:
+                    target = os.path.join(CONFIG.projects_directory, f"{stem}_flat.dxf")
+                else:
+                    raise SWError("Save the part first (save_document) or specify an absolute path.")
+            else:
+                target = os.path.join(os.path.dirname(doc_path), f"{stem}_flat.dxf")
+        else:
+            if not os.path.isabs(target) and CONFIG.projects_directory:
+                target = resolve_save_path(target if target.lower().endswith(".dxf") else f"{target}.dxf")
+            elif not os.path.isabs(target):
+                if not doc_path:
+                    raise SWError("The document was never saved: save it first, or provide an absolute path.")
+                target = os.path.join(os.path.dirname(doc_path), target if target.lower().endswith(".dxf") else f"{target}.dxf")
+            elif not target.lower().endswith(".dxf"):
+                target = f"{target}.dxf"
+        target = os.path.normpath(target)
+        if CONFIG.projects_directory:
+            norm_root = os.path.normcase(os.path.abspath(CONFIG.projects_directory))
+            norm_target = os.path.normcase(os.path.abspath(target))
+            if not (norm_target == norm_root or norm_target.startswith(norm_root + os.sep)):
+                raise SWError(f"Access denied: target path '{target}' is outside the configured projects directory.")
+        folder = os.path.dirname(target)
+        if folder:
+            os.makedirs(folder, exist_ok=True)
+        if os.path.exists(target):
+            try:
+                os.remove(target)
+            except OSError as e:
+                raise SWError(f"Could not overwrite existing file '{target}': {e}") from e
+        options = 1 if remove_bends else 0
+        ok = False
+        try:
+            ok = bool(doc.ExportFlatPatternView(target, options))
+        except Exception:
+            pass
+        if not ok or not os.path.exists(target):
+            try:
+                model_name = doc_path or stem
+                doc.ExportToDWG2(target, model_name, 1, True, [0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1], False, False, 1, None)
+                ok = os.path.exists(target)
+            except Exception:
+                pass
+        if not ok or not os.path.exists(target):
+            raise SWError("Flat pattern export to DXF failed (ensure the part has a sheet metal feature and valid flat pattern).")
+        return f"Exported flat pattern to {target}"
+    return await com_tool(work)
+
+
 # --------------------------------- Material -------------------------------- #
 def material_library() -> list[tuple[str, str, str]]:
     """(database, category, material) for every material in the configured databases."""
