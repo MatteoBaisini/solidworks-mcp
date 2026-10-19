@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.0] - 2026-10-19
+
+### Added
+- **Windows installer** (`installer/`): `SolidWorks-MCP-Setup.exe` installs, without administrator rights, uv, the server (pinned to the latest GitHub release) and Claude Code, and creates the `Documents\SolidWorks-MCP` work folder with `.mcp.json`, design instructions (`CLAUDE.md`), pre-approved server tools and a `projects` folder.
+- **SolidWorks-MCP shortcut**: opens Claude Code in the work folder (Windows Terminal when available), repairs a broken install and checks for a new release once a day.
+- **Release workflow** (`.github/workflows/installer.yml`): builds the installer with NSIS and attaches it to the GitHub release of every `v*` tag.
+- `tests/test_installer.py`: checks the installer's settings, configuration template, tool names in `CLAUDE.md` and packaged files.
+
 ## [2.2.0] - 2026-10-19
 
 ### Added
