@@ -2395,6 +2395,19 @@ async def resource_materials() -> str:
     return await list_materials()
 
 
+def apply_read_only_mode() -> list[str]:
+    """Retains only tools with readOnlyHint=True. Returns the names of removed tools."""
+    non_read = [
+        name for name, t in mcp._tool_manager._tools.items()
+        if not (getattr(t.annotations, "readOnlyHint", False) is True)
+    ]
+    for name in non_read:
+        mcp._tool_manager._tools.pop(name, None)
+    logger.info("Read-only mode active: retained %d READ tools, removed %d write tools.",
+                len(mcp._tool_manager._tools), len(non_read))
+    return non_read
+
+
 # --------------------------------------------------------------------------- #
 def main(argv: list[str] | None = None) -> None:
     global CONFIG
@@ -2416,7 +2429,10 @@ def main(argv: list[str] | None = None) -> None:
         sys.exit(2)
     logger.info("Configuration: %s", CONFIG.source)
 
-    if CONFIG.allow_macro:
+    if CONFIG.read_only:
+        apply_read_only_mode()
+        logger.info("Server is running in READ-ONLY mode.")
+    elif CONFIG.allow_macro:
         register_macro_tool()
         logger.warning("execute_solidworks_macro is ENABLED: the assistant can run arbitrary Python code.")
 

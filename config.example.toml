@@ -37,3 +37,8 @@ directory = "."
 # code on this PC with your privileges. Leave it off unless you trust the
 # assistant and the prompts it receives.
 enabled = false
+
+[safety]
+# Restrict the server to read-only inspection tools (get_*, measure, check_model, ...).
+# When true, all modeling, editing, saving, and deletion tools are hidden.
+read_only = false

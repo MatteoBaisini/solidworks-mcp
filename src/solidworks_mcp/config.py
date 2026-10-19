@@ -18,6 +18,7 @@ from typing import Any
 
 ENV_CONFIG = "SOLIDWORKS_MCP_CONFIG"
 ENV_ALLOW_MACRO = "SOLIDWORKS_MCP_ALLOW_MACRO"
+ENV_READ_ONLY = "SOLIDWORKS_MCP_READ_ONLY"
 LOCAL_NAME = "solidworks-mcp.toml"
 
 EXPORT_FORMATS = ("step", "stp", "iges", "igs", "x_t", "stl", "3mf", "pdf", "png")
@@ -37,6 +38,7 @@ class Config:
     export_directory: str = "."       # relative to the document folder; {format} is replaced
     projects_directory: str = ""      # where the assistant saves parts; empty = not set
     allow_macro: bool = False         # expose execute_solidworks_macro (runs arbitrary code)
+    read_only: bool = False           # expose only READ tools (inspection/review)
     source: str = "(defaults)"
 
 
@@ -57,6 +59,9 @@ _SCHEMA: dict[str, dict[str, tuple[str, type | tuple[type, ...]]]] = {
     },
     "macro": {
         "enabled": ("allow_macro", bool),
+    },
+    "safety": {
+        "read_only": ("read_only", bool),
     },
 }
 
@@ -123,4 +128,8 @@ def load_config(path: str | os.PathLike[str] | None = None) -> Config:
     env_macro = os.environ.get(ENV_ALLOW_MACRO)
     if env_macro is not None:
         cfg.allow_macro = env_macro.strip().lower() in ("1", "true", "yes", "on")
+
+    env_ro = os.environ.get(ENV_READ_ONLY)
+    if env_ro is not None:
+        cfg.read_only = env_ro.strip().lower() in ("1", "true", "yes", "on")
     return cfg

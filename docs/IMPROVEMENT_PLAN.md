@@ -254,7 +254,7 @@ Ogni task: annotazioni letterali, test, riga nella tabella Tools del README, aud
 - [x] **P6. Prompt e risorse MCP.** Prompt `design_part` con il flusso tipico (piano → sketch →
   estrusione → verifica → salvataggio). Risorse READ: `solidworks://active/info`,
   `solidworks://active/feature-tree`, `solidworks://materials`.
-- [ ] **P7. Modalità sola lettura.** `[safety] read_only = true` nel TOML registra solo i tool READ:
+- [x] **P7. Modalità sola lettura.** `[safety] read_only = true` nel TOML registra solo i tool READ:
   utile per revisioni di modelli altrui.
 - [ ] **P8. Assiemi.** `new_assembly`, `insert_component`, `add_mate` (coincident, concentric,
   parallel, distance, angle), `check_interference` (READ). È la lacuna più grande rispetto a 0xFFD e Slacker.

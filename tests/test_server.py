@@ -353,3 +353,22 @@ def test_mcp_prompts_and_resources(monkeypatch):
     mat_content = asyncio.run(server.mcp.read_resource("solidworks://materials"))
     assert any("AISI 304" in str(c) for c in mat_content)
 
+
+def test_apply_read_only_mode():
+    orig_tools = dict(server.mcp._tool_manager._tools)
+    try:
+        removed = server.apply_read_only_mode()
+        assert len(removed) > 0
+        assert "extrude" in removed
+        assert "new_part" in removed
+        assert "save_document" in removed
+
+        current_tools = asyncio.run(server.mcp.list_tools())
+        assert len(current_tools) == 11
+        for t in current_tools:
+            assert t.annotations.readOnlyHint is True
+            assert t.annotations.destructiveHint is False
+    finally:
+        server.mcp._tool_manager._tools = orig_tools
+
+

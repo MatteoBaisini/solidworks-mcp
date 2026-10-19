@@ -1,6 +1,13 @@
 import pytest
 
-from solidworks_mcp.config import ENV_ALLOW_MACRO, ENV_CONFIG, Config, ConfigError, load_config
+from solidworks_mcp.config import (
+    ENV_ALLOW_MACRO,
+    ENV_CONFIG,
+    ENV_READ_ONLY,
+    Config,
+    ConfigError,
+    load_config,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -10,6 +17,7 @@ def isolated(tmp_path, monkeypatch):
     monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
     monkeypatch.delenv(ENV_CONFIG, raising=False)
     monkeypatch.delenv(ENV_ALLOW_MACRO, raising=False)
+    monkeypatch.delenv(ENV_READ_ONLY, raising=False)
 
 
 def write(path, text):
@@ -98,3 +106,16 @@ def test_projects_directory_is_relative_to_the_config_file(tmp_path, monkeypatch
     file = write(tmp_path / "conf" / "abs.toml", f"[projects]\ndirectory = '{absolute}'\n")
     assert load_config(file).projects_directory == str(absolute.resolve())
     assert load_config().projects_directory == ""
+
+
+def test_safety_read_only(tmp_path, monkeypatch):
+    file = write(tmp_path / "safety.toml", "[safety]\nread_only = true\n")
+    cfg = load_config(file)
+    assert cfg.read_only is True
+
+    # Environment variable override
+    monkeypatch.setenv(ENV_READ_ONLY, "0")
+    assert load_config(file).read_only is False
+    monkeypatch.setenv(ENV_READ_ONLY, "true")
+    assert load_config().read_only is True
+
