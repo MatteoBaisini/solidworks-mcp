@@ -21,6 +21,7 @@ EXPECTED_TOOLS = {
     "get_custom_properties", "set_custom_property", "measure", "undo", "delete_feature", "zoom_to_fit",
     "new_assembly", "insert_component", "add_mate", "check_interference",
     "new_drawing", "insert_model_dimensions",
+    "list_configurations", "activate_configuration", "add_configuration",
 }
 
 
@@ -366,7 +367,7 @@ def test_apply_read_only_mode():
         assert "save_document" in removed
 
         current_tools = asyncio.run(server.mcp.list_tools())
-        assert len(current_tools) == 12
+        assert len(current_tools) == 13
         for t in current_tools:
             assert t.annotations.readOnlyHint is True
             assert t.annotations.destructiveHint is False
@@ -483,6 +484,64 @@ def test_insert_model_dimensions(monkeypatch):
     monkeypatch.setattr(server, "rebuild", lambda doc: None)
     res = asyncio.run(server.insert_model_dimensions())
     assert "Inserted 3 model dimension(s)" in res
+
+
+def test_configurations(monkeypatch):
+    class FakeConfig:
+        def __init__(self, name):
+            self.Name = name
+
+    class FakeConfigManager:
+        def __init__(self, parent):
+            self.parent = parent
+        def AddConfiguration2(self, name, comment, alt, opt, parent, desc, use_desc):
+            self.parent.configs.append(name)
+            return FakeConfig(name)
+
+    class FakeDoc:
+        def __init__(self):
+            self.configs = ["Default", "LightWeight"]
+            self.active = "Default"
+            self.ConfigurationManager = FakeConfigManager(self)
+        def GetType(self): return server.SW_DOC_PART
+        def GetTitle(self): return "Part1"
+        def GetConfigurationNames(self): return list(self.configs)
+        def GetActiveConfiguration(self): return FakeConfig(self.active)
+        def ShowConfiguration2(self, name):
+            if name in self.configs:
+                self.active = name
+                return True
+            return False
+
+    fake_doc = FakeDoc()
+    monkeypatch.setattr(server, "active_doc", lambda *args: fake_doc)
+    monkeypatch.setattr(server, "rebuild", lambda doc: None)
+
+    # 1. list_configurations
+    res = asyncio.run(server.list_configurations())
+    assert "Configurations for 'Part1' (active: 'Default'):" in res
+    assert "- Default [ACTIVE]" in res
+    assert "- LightWeight" in res
+
+    # 2. activate_configuration
+    res = asyncio.run(server.activate_configuration("LightWeight"))
+    assert "Activated configuration 'LightWeight'." in res
+    assert fake_doc.active == "LightWeight"
+
+    # Non-existent config
+    with pytest.raises(server.SWError, match="not found"):
+        asyncio.run(server.activate_configuration("NonExistent"))
+
+    # 3. add_configuration
+    res = asyncio.run(server.add_configuration("HeavyDuty", description="Heavy duty model"))
+    assert "Configuration 'HeavyDuty' created and activated." in res
+    assert "HeavyDuty" in fake_doc.configs
+    assert fake_doc.active == "HeavyDuty"
+
+    # Duplicate config
+    with pytest.raises(server.SWError, match="already exists"):
+        asyncio.run(server.add_configuration("HeavyDuty"))
+
 
 
 

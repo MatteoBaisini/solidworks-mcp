@@ -397,16 +397,18 @@ def get_sw() -> Any:
     return app
 
 
-def active_doc(required_type: int | None = None) -> Any:
+def active_doc(required_type: int | tuple[int, ...] | None = None) -> Any:
     doc = get_sw().ActiveDoc
     if doc is None:
         raise SWError("No document is open in SolidWorks. Use new_part to create one.")
     if required_type is not None:
         doc_type = call(doc, "GetType")
-        if doc_type != required_type:
+        valid = (required_type,) if isinstance(required_type, int) else required_type
+        if doc_type not in valid:
+            expected = " or ".join(f"'{DOC_TYPE_NAMES.get(t, t)}'" for t in valid)
             raise SWError(
                 f"The active document is a '{DOC_TYPE_NAMES.get(doc_type, doc_type)}', "
-                f"a '{DOC_TYPE_NAMES.get(required_type, required_type)}' is needed.")
+                f"a {expected} is needed.")
     return doc
 
 
@@ -1244,6 +1246,71 @@ async def insert_model_dimensions() -> str:
         count = len(annotations) if annotations else 0
         rebuild(doc)
         return f"Inserted {count} model dimension(s) into the drawing."
+    return await com_tool(work)
+
+
+# ----------------------------- Configurations ----------------------------- #
+@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False,
+                       "idempotentHint": True, "openWorldHint": False})
+async def list_configurations() -> str:
+    """Lists all configurations in the active part or assembly document, indicating the active one."""
+    def work():
+        doc = active_doc((SW_DOC_PART, SW_DOC_ASSEMBLY))
+        names = doc.GetConfigurationNames()
+        if not names:
+            return "No configurations found."
+        active_cfg = doc.GetActiveConfiguration()
+        active_name = active_cfg.Name if active_cfg is not None else ""
+        lines = [f"Configurations for '{doc.GetTitle()}' (active: '{active_name}'):"]
+        for name in names:
+            marker = " [ACTIVE]" if name == active_name else ""
+            lines.append(f"- {name}{marker}")
+        return "\n".join(lines)
+    return await com_tool(work)
+
+
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
+                       "idempotentHint": True, "openWorldHint": False})
+async def activate_configuration(name: str) -> str:
+    """Activates an existing configuration by name in the active part or assembly."""
+    def work():
+        clean_name = name.strip() if name else ""
+        if not clean_name:
+            raise SWError("Configuration name cannot be empty.")
+        doc = active_doc((SW_DOC_PART, SW_DOC_ASSEMBLY))
+        names = doc.GetConfigurationNames()
+        if not names or clean_name not in names:
+            avail = ", ".join(f"'{n}'" for n in (names or []))
+            raise SWError(f"Configuration '{clean_name}' not found. Available configurations: {avail or 'none'}.")
+        ok = doc.ShowConfiguration2(clean_name)
+        if not ok:
+            raise SWError(f"Failed to activate configuration '{clean_name}'.")
+        rebuild(doc)
+        return f"Activated configuration '{clean_name}'."
+    return await com_tool(work)
+
+
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
+                       "idempotentHint": False, "openWorldHint": False})
+async def add_configuration(name: str, description: str = "", comment: str = "") -> str:
+    """Adds a new configuration to the active part or assembly document and activates it."""
+    def work():
+        clean_name = name.strip() if name else ""
+        if not clean_name:
+            raise SWError("Configuration name cannot be empty.")
+        doc = active_doc((SW_DOC_PART, SW_DOC_ASSEMBLY))
+        names = doc.GetConfigurationNames()
+        if names and clean_name in names:
+            raise SWError(f"Configuration '{clean_name}' already exists.")
+        mgr = doc.ConfigurationManager
+        if mgr is None:
+            raise SWError("ConfigurationManager not available.")
+        cfg = mgr.AddConfiguration2(clean_name, comment, "", 0, "", description, False)
+        if cfg is None:
+            raise SWError(f"Failed to add configuration '{clean_name}'.")
+        doc.ShowConfiguration2(clean_name)
+        rebuild(doc)
+        return f"Configuration '{clean_name}' created and activated."
     return await com_tool(work)
 
 

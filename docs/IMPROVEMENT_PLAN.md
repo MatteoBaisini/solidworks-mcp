@@ -260,7 +260,7 @@ Ogni task: annotazioni letterali, test, riga nella tabella Tools del README, aud
   parallel, distance, angle), `check_interference` (READ). È la lacuna più grande rispetto a 0xFFD e Slacker.
 - [x] **P9. Tavole 2D.** `new_drawing` dal pezzo attivo, tre viste standard + isometrica,
   `insert_model_dimensions`, export PDF/DXF.
-- [ ] **P10. Configurazioni.** `list_configurations` (READ), `activate_configuration`, `add_configuration`.
+- [x] **P10. Configurazioni.** `list_configurations` (READ), `activate_configuration`, `add_configuration`.
 - [ ] **P11. Lamiera.** `base_flange`, `edge_flange`, `export_flat_pattern` (DXF).
 - [ ] **P12. CLI di supporto.** `solidworks-mcp doctor` (SolidWorks raggiungibile, stessi privilegi,
   modello di parte predefinito impostato, versione) e `solidworks-mcp install --client ...` che scrive
