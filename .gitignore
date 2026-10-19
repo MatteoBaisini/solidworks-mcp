@@ -18,3 +18,9 @@ solidworks-mcp.toml
 # Your own parts (only the folder's README is tracked)
 projects/*
 !projects/README.md
+
+# Internal development, agent instructions, and planning notes
+.agents/
+AGENTS.md
+docs/
+

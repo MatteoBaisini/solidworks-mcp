@@ -13,4 +13,3 @@ jobs:
           python-version: "3.12"
       - run: pip install -e .[dev]
       - run: pytest -q
-      - run: python .agents/skills/m8ven-audit/scripts/m8ven_audit.py --quiet
