@@ -265,7 +265,7 @@ Ogni task: annotazioni letterali, test, riga nella tabella Tools del README, aud
 - [x] **P12. CLI di supporto.** `solidworks-mcp doctor` (SolidWorks raggiungibile, stessi privilegi,
   modello di parte predefinito impostato, versione) e `solidworks-mcp install --client ...` che scrive
   la configurazione con backup.
-- [ ] **P13. Test di integrazione.** Marker `solidworks`: crea una piastra 100×50×10 con foro Ø10 e
+- [x] **P13. Test di integrazione.** Marker `solidworks`: crea una piastra 100×50×10 con foro Ø10 e
   confronta il volume con il calcolo (49 214,6 mm³), saltati se SolidWorks non risponde.
 - [ ] **P14. Dividere `server.py`** (2100 righe) in moduli per gruppo di tool. Solo dopo la Fase A,
   mantenendo le annotazioni letterali nei decoratori.

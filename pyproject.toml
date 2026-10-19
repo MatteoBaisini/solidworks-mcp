@@ -40,3 +40,6 @@ packages = ["src/solidworks_mcp"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "solidworks: tests requiring a running SolidWorks instance",
+]
