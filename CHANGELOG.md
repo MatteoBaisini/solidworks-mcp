@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-11-11
+
 Every tool added in 2.2.0 has now been exercised against a live SolidWorks 2026 session
 (`tests/test_integration.py` plus a smoke run over configurations, drawings, assemblies and
 sheet metal). The run exposed the following defects, all fixed here.
