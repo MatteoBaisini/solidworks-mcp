@@ -8,6 +8,12 @@ import shutil
 import sys
 from typing import Any
 
+# swUserPreferenceStringValue_e, same values as in server.py (not imported from there so the
+# CLI does not build the MCP server just to run a diagnostic)
+SW_DEFAULT_TEMPLATE_PART = 8
+SW_DEFAULT_TEMPLATE_ASSEMBLY = 9
+SW_DEFAULT_TEMPLATE_DRAWING = 10
+
 
 def check_privileges() -> bool:
     """Returns True if running as elevated administrator on Windows."""
@@ -61,10 +67,10 @@ def run_doctor() -> int:
 
     # 5. Templates check (if connected)
     if sw is not None:
-        templates = [
-            ("Part Template", 0),      # SW_DEFAULT_TEMPLATE_PART
-            ("Assembly Template", 1),  # SW_DEFAULT_TEMPLATE_ASSEMBLY
-            ("Drawing Template", 2),   # SW_DEFAULT_TEMPLATE_DRAWING
+        templates = [  # swUserPreferenceStringValue_e
+            ("Part Template", SW_DEFAULT_TEMPLATE_PART),
+            ("Assembly Template", SW_DEFAULT_TEMPLATE_ASSEMBLY),
+            ("Drawing Template", SW_DEFAULT_TEMPLATE_DRAWING),
         ]
         for name, pref_id in templates:
             try:

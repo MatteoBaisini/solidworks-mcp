@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+Every tool added in 2.2.0 has now been exercised against a live SolidWorks 2026 session
+(`tests/test_integration.py` plus a smoke run over configurations, drawings, assemblies and
+sheet metal). The run exposed the following defects, all fixed here.
+
+### Fixed
+- `check_model` reported "geometry faults" on every healthy part: `Body2.Check3` always returns a fault object, whose `Count` is now read.
+- `list_configurations`, `activate_configuration` and `add_configuration` crashed with "'tuple' object is not callable" (late-binding property access). `activate_configuration` now verifies the active configuration instead of trusting the return value, and reports when it was already active.
+- `base_flange` never created anything: the sketch must be open and the bend-allowance parameter must be a COM `Nothing`. The arguments now follow the SolidWorks API example.
+- `edge_flange` passed Python lists where the API wants SAFEARRAYs and produced a zero-length flange: it now draws the flange profile (edge length × `length_mm`) in the sketch SolidWorks creates for the flange.
+- `add_mate` treated every successful mate as a failure (`swAddMateError_NoError` is 1, not 0).
+- `add_mate` by points found no faces in assemblies: the geometric pick now searches the bodies of every component, in assembly coordinates.
+- `insert_component` failed when the part was not already open in SolidWorks: the file is now opened in the background and closed again. The component's origin is placed exactly at the requested point (SolidWorks positions the centre otherwise).
+- `check_interference` crashed on "'NoneType' object is not callable" and no longer triggers the interactive Tools > Interference command.
+- `new_drawing` reported success even when no view could be placed, and the isometric view failed on non-English installations (localised view name).
+- `get_active_document_info` reported "sketch open" on every drawing.
+- `tests/test_integration.py` called tools with wrong signatures and looked for the top face on the wrong axis, so it could never pass.
+- `solidworks-mcp doctor` read the wrong SolidWorks preferences when checking the default templates.
+
+### Changed
+- `examples/smoke_test.py` covers parts, configurations, drawings, assemblies and sheet metal through the MCP protocol (`smoke_test.py all`), works in a temporary folder, closes the documents it opens and exits with the number of failed calls.
+- Clearer descriptions: the `sketch_polygon` diameter goes through the vertices, `export_document` lists dxf and dwg, the patterns say they add a hidden reference axis, `add_mate` says it moves components and replaces the selection, `insert_component` says it places the component origin.
+
 ## [2.3.0] - 2026-10-19
 
 ### Added
@@ -34,7 +58,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Rebuild Error Detection (P2)**: `finish_feature` interrogates `Feature.GetErrorCode2` immediately after creation and raises actionable errors on rebuild failure.
 - **Structured Output (P3)**: `get_bounding_box`, `get_mass_properties`, `get_dimensions`, and `measure` return strongly typed dictionaries (`TypedDict`) for direct machine readability.
 - **Input Validation (P4)**: Applied Pydantic `Annotated` + `Field` constraints across all 2D sketching and 3D modeling tools for positive dimensions, valid angles, and minimum side counts.
-- **Secure File Saves (P5)**: Confined file operations to `projects_directory` (when configured), prohibited directory traversal (`..`), and added `overwrite: bool = True` requirement to `save_document`.
+- **Secure File Saves (P5)**: Confined file operations to `projects_directory` (when configured), prohibited directory traversal (`..`), and added an `overwrite` flag to `save_document` (default `False`: an existing file is not replaced unless `overwrite=True`).
 
 ## [2.1.0] - 2026-10-18
 
