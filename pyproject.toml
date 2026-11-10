@@ -3,6 +3,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
+# Published on PyPI as "solidworks-mcp-server" (that name is set by .github/workflows/publish.yml at
+# build time, as "solidworks-mcp" belongs to another project there). It stays "solidworks-mcp" here
+# because installed copies update from the GitHub archive with "uv tool install solidworks-mcp @ <url>".
 name = "solidworks-mcp"
 dynamic = ["version"]
 description = "MCP server that lets an AI assistant drive SolidWorks through its COM API"
@@ -28,6 +31,10 @@ dev = ["pytest>=8"]
 
 [project.scripts]
 solidworks-mcp = "solidworks_mcp.server:main"
+solidworks-mcp-server = "solidworks_mcp.server:main"   # so that "uvx solidworks-mcp-server" works
+
+[project.gui-scripts]
+solidworks-mcp-panel = "solidworks_mcp.panel:main"     # control panel, no console window
 
 [project.urls]
 Repository = "https://github.com/MatteoBaisini/solidworks-mcp"

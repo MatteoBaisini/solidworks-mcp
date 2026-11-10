@@ -29,7 +29,12 @@ work with the user.
 - Dimensions in millimetres, angles in degrees, always.
 - Fully define sketches (`fully_define_sketch` or explicit dimensions): parts the user can
   edit later are worth more than parts that only look right.
-- Use `hole` with ISO sizes (M3, M4, M6...) for screw holes rather than plain circles.
+- Use `hole` with ISO sizes (M3, M4, M6...) for screw holes rather than plain circles;
+  tapped holes can carry a cosmetic thread (`thread=True`).
+- Pick faces and edges from `list_faces` / `list_edges` (each entry has a point that lies
+  on it) instead of guessing coordinates.
+- To change an existing part, `open_document` it, then `edit_sketch` or `edit_feature`
+  (or `set_dimension`) rather than rebuilding it from scratch.
 - After every feature, read the tool's answer. On `ERROR`, do not repeat the same call: use
   `get_feature_tree` or `check_model` to see what happened, `undo` if needed, then try a
   different approach. After two failed attempts on the same step, explain and ask.
@@ -49,7 +54,7 @@ Report the checks in one or two lines (size, mass, any issue).
   `projects/<project>/cad/<project>_v<N>_<description>.SLDPRT`, lowercase with underscores.
   Pass `save_document` a path relative to `projects/`, e.g. `bracket/cad/bracket_v1_base.SLDPRT`.
 - A change to a saved part becomes a new version (`_v2_`, `_v3_`...): never overwrite
-  an earlier version.
+  an earlier version. `save_document(new_version=True)` picks the next free number.
 - `export_document` writes STEP next to the project (`projects/<project>/step/`); add
   `stl` for 3D printing when the user asks.
 - Keep `projects/<project>/README.md` up to date: purpose, main dimensions, material, list

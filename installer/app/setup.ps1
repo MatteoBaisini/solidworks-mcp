@@ -107,7 +107,8 @@ function Get-ServerExe([string]$Uv) {
 }
 
 function Test-ServerRunning {
-    return [bool](Get-Process -Name $Script:ToolName -ErrorAction SilentlyContinue)
+    # The control panel runs from the same uv tool environment, so it locks it too.
+    return [bool](Get-Process -Name $Script:ToolName, "$($Script:ToolName)-panel" -ErrorAction SilentlyContinue)
 }
 
 function Install-Server([string]$Uv, $Source) {

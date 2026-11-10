@@ -1,5 +1,8 @@
 # solidworks-mcp
 
+<!-- mcp-name: io.github.matteobaisini/solidworks-mcp -->
+
+[![PyPI](https://img.shields.io/pypi/v/solidworks-mcp-server)](https://pypi.org/project/solidworks-mcp-server/)
 [![tests](https://github.com/MatteoBaisini/solidworks-mcp/actions/workflows/tests.yml/badge.svg)](https://github.com/MatteoBaisini/solidworks-mcp/actions/workflows/tests.yml)
 [![M8ven Trust Score](https://m8ven.ai/badge/mcp/matteobaisini/solidworks-mcp)](https://m8ven.ai/mcp/matteobaisini/solidworks-mcp?s=readme)
 
@@ -28,7 +31,7 @@ Download **[SolidWorks-MCP-Setup.exe](https://github.com/MatteoBaisini/solidwork
 - Claude Code, if it is not installed yet
 - a work folder, `Documents\SolidWorks-MCP`, with `.mcp.json`, design instructions for the assistant (`CLAUDE.md`), the server's tools pre-approved, and a `projects` folder for your parts
 
-Then double-click **SolidWorks-MCP** on the desktop: Claude Code opens in the work folder and starts the server. The first time, it asks you to log in (Pro, Max, Team or Enterprise plan) and to trust the folder. The shortcut checks for a new release once a day; *Start menu > SolidWorks-MCP > Repair* fixes a broken install, and uninstalling keeps your work folder.
+Then double-click **SolidWorks-MCP** on the desktop: the control panel opens (see below); *Start Claude* opens Claude Code in the work folder, which starts the server. The first time, it asks you to log in (Pro, Max, Team or Enterprise plan) and to trust the folder. The shortcut checks for a new release once a day; *Start menu > SolidWorks-MCP > Repair* fixes a broken install, and uninstalling keeps your work folder.
 
 The installer is not code-signed, so Windows SmartScreen may show *Windows protected your PC*: choose *More info > Run anyway*.
 
@@ -36,14 +39,14 @@ To build it yourself: `bash installer/build.sh` (needs [NSIS](https://nsis.sourc
 
 ### Manual install
 
-With [uv](https://docs.astral.sh/uv/), nothing needs installing by hand. Add the server to your MCP client configuration:
+The package is on PyPI as **`solidworks-mcp-server`**. With [uv](https://docs.astral.sh/uv/), nothing needs installing by hand. Add the server to your MCP client configuration:
 
 ```json
 {
   "mcpServers": {
     "solidworks": {
       "command": "uvx",
-      "args": ["--from", "git+https://github.com/MatteoBaisini/solidworks-mcp", "solidworks-mcp"]
+      "args": ["solidworks-mcp-server"]
     }
   }
 }
@@ -52,10 +55,12 @@ With [uv](https://docs.astral.sh/uv/), nothing needs installing by hand. Add the
 With pip:
 
 ```
-pip install git+https://github.com/MatteoBaisini/solidworks-mcp
+pip install solidworks-mcp-server
 ```
 
-and use `"command": "solidworks-mcp"` with no arguments in the client configuration.
+and use `"command": "solidworks-mcp"` with no arguments in the client configuration (`solidworks-mcp-server` works too).
+
+The latest code from GitHub, before it is released: `"args": ["--from", "git+https://github.com/MatteoBaisini/solidworks-mcp", "solidworks-mcp"]`.
 
 From a clone, run `install.bat` (it creates `.venv` and installs the server in it), then use the full path of `.venv\Scripts\solidworks-mcp.exe` as the command.
 
@@ -72,6 +77,18 @@ SolidWorks and the server must run with the same privileges: do not run either o
   solidworks-mcp install --client claude   # or cursor, windsurf, all
   ```
 
+### Control panel
+
+`solidworks-mcp-panel` (or `solidworks-mcp panel --workspace <folder>`) opens a small window for people who are new to CAD or to Claude Code. In English or Italian, following the Windows language, it:
+
+- starts Claude Code in the work folder, optionally with a first request;
+- shows live status: whether SolidWorks is running and which document is active, and whether Claude is waiting, thinking, designing (with the current step in plain words) or asking for a permission. It also warns when SolidWorks stops answering;
+- lists every step with its result and duration;
+- fills in requests from part templates (plate, L bracket, flange, spacer, box) and offers one-click requests (check, show, export, save a new version, undo);
+- has a short guide, the `doctor` checks, and buttons that open the projects folder and the last saved part.
+
+The status comes from [Claude Code hooks](https://code.claude.com/docs/en/hooks) that the panel adds to `<work folder>\.claude\settings.local.json`, keeping your other settings. They append one line per event to `%LOCALAPPDATA%\solidworks-mcp\activity.jsonl`. The panel reads SolidWorks through COM read-only and never starts it. Nothing leaves the PC, and the MCP server itself is unchanged.
+
 ## Tools
 
 Every tool declares standard MCP annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`), allowing clients to automatically authorize safe read and inspection calls while prompting for changes.
@@ -79,20 +96,20 @@ Every tool declares standard MCP annotations (`readOnlyHint`, `destructiveHint`,
 | Group | Tools |
 |---|---|
 | Information | `get_active_document_info`, `get_feature_tree`, `get_bounding_box`, `get_mass_properties`, `get_screenshot`, `measure`, `check_model` |
-| Documents | `new_part`, `save_document`, `export_document` |
+| Documents | `new_part`, `open_document`, `list_open_documents`, `activate_document`, `close_document`, `save_document`, `export_document` |
 | Assemblies | `new_assembly`, `insert_component`, `add_mate`, `check_interference` |
 | Drawings | `new_drawing`, `insert_model_dimensions` |
 | Configurations | `list_configurations`, `activate_configuration`, `add_configuration` |
-| Selection | `select_plane`, `select_face_at_point`, `select_edge_at_point` |
-| Sketch | `start_sketch`, `end_sketch`, `sketch_line`, `sketch_rectangle`, `sketch_circle`, `sketch_arc`, `sketch_polygon`, `sketch_slot`, `sketch_ellipse`, `sketch_spline`, `sketch_fillet`, `sketch_offset`, `convert_entities`, `convert_point` |
+| Selection | `select_plane`, `select_face_at_point`, `select_edge_at_point`, `list_faces`, `list_edges` |
+| Sketch | `start_sketch`, `end_sketch`, `sketch_line`, `sketch_rectangle`, `sketch_circle`, `sketch_arc`, `sketch_polygon`, `sketch_slot`, `sketch_ellipse`, `sketch_spline`, `sketch_fillet`, `sketch_offset`, `sketch_point`, `sketch_trim`, `sketch_mirror`, `sketch_linear_pattern`, `sketch_circular_pattern`, `delete_sketch_entity`, `edit_sketch`, `convert_entities`, `convert_point` |
 | Sketch constraints | `fully_define_sketch`, `add_sketch_dimension`, `add_sketch_relation` |
-| Features | `extrude`, `cut_extrude`, `revolve`, `rib`, `sweep`, `loft`, `create_plane` |
+| Features | `extrude`, `cut_extrude`, `revolve`, `rib`, `sweep`, `loft`, `create_plane`, `create_axis`, `draft` |
 | Finishing | `fillet`, `chamfer`, `shell`, `hole` |
 | Sheet Metal | `base_flange`, `edge_flange`, `export_flat_pattern` |
 | Patterns | `linear_pattern`, `circular_pattern`, `mirror` |
 | Material | `list_materials`, `set_material` |
 | Parameters | `get_dimensions`, `set_dimension`, `suppress_feature`, `get_equations`, `add_equation`, `delete_equation`, `get_custom_properties`, `set_custom_property` |
-| Editing | `undo`, `delete_feature`, `zoom_to_fit` |
+| Editing | `edit_feature`, `rename_feature`, `undo`, `delete_feature`, `zoom_to_fit` |
 | Optional | `execute_solidworks_macro` (off by default, see [Security](#security)) |
 
 A typical part is `new_part` → `select_plane` → `start_sketch` → sketch tools → `extrude`, then `select_face_at_point` → `start_sketch` → `cut_extrude` for pockets, `hole` for drilled holes, `fillet` / `chamfer` for the edges and `set_material` for a real mass.
@@ -100,10 +117,12 @@ A typical part is `new_part` → `select_plane` → `start_sketch` → sketch to
 How the assistant points at things:
 
 - Sketch tools take sketch coordinates (x, y). `start_sketch` reports how the sketch axes map onto the model, and `convert_point` converts single points.
-- Faces, edges and vertices (fillet, chamfer, shell, hole, measure, ...) are picked by a point lying on them, in model coordinates [x, y, z]. The pick is geometric, so it also finds entities hidden in the current view.
+- Faces, edges and vertices (fillet, chamfer, shell, hole, measure, ...) are picked by a point lying on them, in model coordinates [x, y, z]. The pick is geometric, so it also finds entities hidden in the current view. `list_faces` and `list_edges` list them with a point on each, their type, size and the feature that made them, so the assistant does not have to guess.
 - Features and sketches are referred to by the names in the feature tree, which every tool that creates one returns.
 - Extrusions and cuts can go blind, midplane, through all or up to a face, in two directions, with draft, and as thin walls.
-- `hole` drills plain, counterbored or countersunk holes, sized by diameter or by metric screw size (ISO 273 clearance, tap drill, ISO 4762 / ISO 10642 counterbores and countersinks). Threads are not modelled.
+- `hole` drills plain, counterbored or countersunk holes, sized by diameter or by metric screw size (ISO 273 clearance, tap drill, ISO 4762 / ISO 10642 counterbores and countersinks). Tapped holes can carry a cosmetic thread (`thread=True`); threads are not modelled as geometry.
+- Reference planes can be offset from a plane, at an angle around an axis or an edge, or through three vertices; `create_axis` adds an axis through a cylindrical face, an edge or two planes.
+- Existing parts: `open_document` opens one, `edit_sketch` reopens a sketch, `edit_feature` changes an extrusion's depth or end condition, and `save_document(new_version=True)` saves the next version without overwriting the previous one.
 - Linear and circular patterns run along the model axes (a hidden reference axis is added the first time) or around an edge.
 
 ## Prompts & Resources
