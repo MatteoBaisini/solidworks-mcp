@@ -79,6 +79,61 @@ class MeasureResult(TypedDict, total=False):
     is_perpendicular: bool
 
 
+class FaceInfo(TypedDict, total=False):
+    index: int
+    type: str                    # plane, cylinder, cone, sphere, torus, other
+    point_mm: list[float]        # lies ON the face, inside its boundary: use it to pick the face
+    area_mm2: float
+    normal: list[float]          # planar faces: outward unit normal
+    diameter_mm: float           # cylinders, cones (at the reference), spheres
+    axis: list[float]            # cylinders and cones: axis direction
+    axis_point_mm: list[float]   # cylinders and cones: a point on the axis; spheres: the centre
+    concave: bool                # cylinders: True for a hole, False for a boss / shaft
+    feature: str                 # feature that created the face
+
+
+class FaceList(TypedDict):
+    count: int        # faces returned
+    total: int        # faces matching the filters
+    truncated: bool
+    faces: list[FaceInfo]
+
+
+class EdgeInfo(TypedDict, total=False):
+    index: int
+    type: str                    # line, circle, arc, ellipse, spline, other
+    point_mm: list[float]        # mid-point, ON the edge: use it to pick the edge
+    length_mm: float
+    start_mm: list[float]
+    end_mm: list[float]
+    center_mm: list[float]       # circles and arcs
+    diameter_mm: float           # circles and arcs
+    axis: list[float]            # circles and arcs: normal of the circle plane
+    features: list[str]          # features of the two faces that meet at the edge
+
+
+class EdgeList(TypedDict):
+    count: int
+    total: int
+    truncated: bool
+    edges: list[EdgeInfo]
+
+
+class OpenDocument(TypedDict):
+    title: str
+    path: str
+    type: str
+    modified: bool
+    visible: bool
+    read_only: bool
+
+
+class OpenDocuments(TypedDict):
+    active: str | None
+    count: int
+    documents: list[OpenDocument]
+
+
 try:
     import winreg
 except ImportError:
@@ -181,8 +236,22 @@ SW_DIM_ANGULAR, SW_DIM_INTEGER = 1, 2   # swDimensionParamType_e
 SW_CUSTOM_INFO_TEXT = 30
 SW_CUSTOM_PROPERTY_REPLACE = 2
 SW_REF_PLANE_DISTANCE, SW_REF_PLANE_FLIP = 8, 256
+SW_REF_PLANE_COINCIDENT, SW_REF_PLANE_ANGLE = 4, 16   # swRefPlaneReferenceConstraints_e
 SW_OPEN_SILENT = 1                # swOpenDocOptions_Silent
+SW_OPEN_READ_ONLY = 2             # swOpenDocOptions_ReadOnly
+SW_DONT_REBUILD_ON_ACTIVATION = 1  # swRebuildOnActivation_e.swDontRebuildActiveDoc (no dialog)
+SW_TRIM_CLOSEST = 0               # swSketchTrimChoice_e.swSketchTrimClosest
+SW_SKETCH_LINE, SW_SKETCH_ARC = 0, 1  # swSketchSegments_e
+SW_COSMETIC_STANDARD_NONE = -2    # swCosmeticStandardType_e.swStandardType_StandardNone
+SW_COSMETIC_BLIND, SW_COSMETIC_THROUGH = 0, 2   # swCosmeticEndConditions_e
+SW_DRAFT_NO_PROPAGATION = 0       # swDraftFacePropagationType_e.swFacePropNone
 SW_MATE_NO_ERROR = 1              # swAddMateError_NoError
+DOC_EXTENSIONS = {".sldprt": SW_DOC_PART, ".sldasm": SW_DOC_ASSEMBLY, ".slddrw": SW_DOC_DRAWING}
+OPEN_ERRORS = {   # swFileLoadError_e: what to tell the user
+    2: "file not found", 1024: "not a SolidWorks file of that type", 8192: "saved by a newer SolidWorks",
+    65536: "another open document has the same name", 2097152: "the file needs repairing",
+    8388608: "SolidWorks is busy",
+}
 DOC_TYPE_NAMES = {SW_DOC_PART: "Part", SW_DOC_ASSEMBLY: "Assembly", SW_DOC_DRAWING: "Drawing"}
 
 MATE_TYPES = {
@@ -213,7 +282,14 @@ Rules:
   model; convert_point converts between model and sketch coordinates.
 - Sketch tools take SKETCH coordinates (x, y); tools that pick faces, edges or
   vertices (fillet, chamfer, shell, hole, measure, ...) take MODEL coordinates [x, y, z]
-  of a point lying exactly on the entity.
+  of a point lying exactly on the entity. Do not guess them: list_faces and list_edges
+  (optionally for one feature, or one type such as cylinder / circle) give a point_mm on
+  each face and edge, with normals, diameters and axes.
+- Existing work: open_document opens a saved part (relative paths are in the projects
+  folder), list_open_documents / activate_document / close_document manage the windows.
+  edit_sketch reopens a sketch (finish with end_sketch), edit_feature changes an
+  extrusion or cut, set_dimension any other dimension, rename_feature gives clear names.
+  save_document(new_version=True) saves the next version (_v2_, _v3_...) of the file.
 - Features are referred to by the names shown by get_feature_tree; every tool that
   creates one returns its name.
 - The user may be working in SolidWorks too: call get_active_document_info before
@@ -349,26 +425,101 @@ def find_solidworks_exe() -> str | None:
     return exe if exe and os.path.isfile(exe) else None
 
 
+STARTUP_POLL_S = 2.0
+STARTUP_SETTLE_S = 20.0   # visible for this long = ready, when StartupProcessCompleted stays False
+_launch_state: dict[str, float] = {"since": float("-inf")}   # when this server last started SLDWORKS.exe
+
+
+CREATE_NEW_PROCESS_GROUP = 0x00000200
+
+
+def _user_environment() -> dict[str, str] | None:
+    """The user's full default environment, as Windows builds it for a new logon session.
+
+    MCP clients often start their server with only a dozen variables (the Python MCP client keeps
+    APPDATA, PATH, TEMP...): SolidWorks inheriting that misses windir, ProgramFiles, ProgramData...
+    and fails to load the .NET Framework at startup. None = inherit this process's environment."""
+    try:
+        import win32api
+        import win32profile
+        import win32security
+        token = win32security.OpenProcessToken(win32api.GetCurrentProcess(),
+                                               win32security.TOKEN_QUERY | win32security.TOKEN_DUPLICATE)
+        return {str(k): str(v) for k, v in win32profile.CreateEnvironmentBlock(token, False).items()}
+    except Exception:
+        return None
+
+
+def _in_job() -> bool:
+    """True when this process belongs to a Windows job (MCP clients often put their server in one)."""
+    try:
+        import win32api
+        import win32job
+        return bool(win32job.IsProcessInJob(win32api.GetCurrentProcess(), None))
+    except Exception:
+        return False
+
+
+def _start_detached(exe: str) -> None:
+    """Starts SLDWORKS.exe so that it does not belong to this server's process tree.
+
+    MCP clients may put their server in a Windows job that kills every process in it on exit (the
+    Python MCP client does): SolidWorks, with the user's unsaved work, must not go with it. Inside
+    a job the desktop shell (explorer.exe) starts it, as a double-click would: that also gives it
+    the user's full environment. Breaking away from the job is not reliable with nested jobs.
+    (COM activation would detach it too, but runs SolidWorks in automation mode, where some of its
+    .NET components fail to load and show an error at startup.)"""
+    quiet = dict(stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True,
+                 env=_user_environment())
+    if _in_job():
+        subprocess.Popen(["explorer.exe", exe], **quiet)
+        logger.info("SolidWorks started through the desktop shell")
+    else:
+        subprocess.Popen([exe], creationflags=CREATE_NEW_PROCESS_GROUP, **quiet)
+
+
+def _ready(app: Any, visible_since: list[float]) -> bool:
+    """True once SolidWorks accepts commands."""
+    try:
+        call(app, "RevisionNumber")   # fails while the object is not fully registered yet
+    except (pywintypes.com_error, AttributeError):
+        return False
+    try:
+        if call(app, "StartupProcessCompleted"):
+            return True
+    except (pywintypes.com_error, AttributeError):
+        return True  # property missing in old releases: answering is enough
+    # Some releases (seen on SolidWorks 2026) never set
+    # StartupProcessCompleted although they accept commands: a window shown for a while is enough.
+    try:
+        visible = bool(call(app, "Visible"))
+    except (pywintypes.com_error, AttributeError):
+        visible = False
+    if not visible:
+        return False
+    if not visible_since:
+        visible_since.append(time.monotonic())
+    return time.monotonic() - visible_since[0] >= STARTUP_SETTLE_S
+
+
 def _launch() -> Any:
     """Starts SolidWorks and waits until it accepts commands."""
     exe = find_solidworks_exe()
     if exe is None:
         raise SWError("SolidWorks is not running and SLDWORKS.exe was not found. Start SolidWorks, or set "
                       "[solidworks] executable in the configuration file.")
-    logger.info("SolidWorks is not running: starting %s", exe)
-    subprocess.Popen([exe], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                     stderr=subprocess.DEVNULL, close_fds=True)
+    if time.monotonic() - _launch_state["since"] > CONFIG.startup_timeout_s:  # not twice while it starts
+        logger.info("SolidWorks is not running: starting %s", exe)
+        _start_detached(exe)
+        _launch_state["since"] = time.monotonic()
+    app = None
     deadline = time.monotonic() + CONFIG.startup_timeout_s
+    visible_since: list[float] = []
     while time.monotonic() < deadline:
-        time.sleep(2)
-        app = _attach()
-        if app is None:
-            continue
-        try:
-            if call(app, "StartupProcessCompleted"):
-                return app
-        except (pywintypes.com_error, AttributeError):
-            return app  # property missing in old releases: being attached is enough
+        if app is not None and _ready(app, visible_since):
+            return app
+        time.sleep(STARTUP_POLL_S)
+        app = app or _attach()
     raise SWError(f"SolidWorks did not finish starting within {CONFIG.startup_timeout_s:.0f} s.")
 
 
@@ -492,6 +643,72 @@ def resolve_save_path(path: str) -> str:
         if not os.path.isdir(folder):
             raise SWError(f"The folder {folder} does not exist.")
         return full_path
+
+
+def check_inside_projects(target: str, what: str = "document") -> None:
+    """Refuses a file outside the projects folder, when one is configured."""
+    root = CONFIG.projects_directory
+    if not root:
+        return
+    norm_root = os.path.normcase(os.path.abspath(root))
+    norm_target = os.path.normcase(os.path.abspath(target))
+    if not (norm_target == norm_root or norm_target.startswith(norm_root + os.sep)):
+        raise SWError(f"Access denied: {what} '{target}' is outside the configured projects directory.")
+
+
+def resolve_open_path(path: str) -> str:
+    """Full path of an existing SolidWorks file: relative paths are relative to the projects folder.
+    Reading is allowed anywhere; only saving is confined to the projects folder."""
+    if not path.strip():
+        raise SWError("Give the path of the file to open.")
+    if os.path.isabs(path):
+        full = os.path.normpath(path)
+    elif CONFIG.projects_directory:
+        full = os.path.normpath(os.path.join(CONFIG.projects_directory, path))
+    else:
+        raise SWError("Give a full path: no projects folder is set in the configuration.")
+    if os.path.splitext(full)[1].lower() not in DOC_EXTENSIONS:
+        raise SWError("Only SolidWorks files can be opened (.SLDPRT, .SLDASM, .SLDDRW).")
+    if not os.path.isfile(full):
+        raise SWError(f"File not found: {full}")
+    return full
+
+
+VERSION_STEM = re.compile(r"^(?P<head>.*_v)(?P<n>\d+)(?P<tail>_.*)?$", re.IGNORECASE)
+
+
+def next_version_path(path: str) -> str:
+    """The next free version of a file: bracket_v1_base.SLDPRT -> bracket_v2_base.SLDPRT
+    (part.SLDPRT -> part_v2.SLDPRT). Never returns an existing file."""
+    folder, name = os.path.split(path)
+    stem, ext = os.path.splitext(name)
+    m = VERSION_STEM.match(stem)
+    head, n, tail = (m["head"], int(m["n"]), m["tail"] or "") if m else (stem + "_v", 1, "")
+    while True:
+        n += 1
+        candidate = os.path.join(folder, f"{head}{n}{tail}{ext}")
+        if not os.path.exists(candidate):
+            return candidate
+
+
+def open_documents(sw: Any) -> list[Any]:
+    return list(call(sw, "GetDocuments") or ())
+
+
+def find_open_doc(sw: Any, name: str) -> Any:
+    """An open document by title, file name (with or without extension) or full path."""
+    key = name.strip().lower()
+    docs = open_documents(sw)
+    for doc in docs:
+        title = str(call(doc, "GetTitle") or "")
+        path = str(call(doc, "GetPathName") or "")
+        base = os.path.basename(path)
+        names = {title.lower(), os.path.splitext(title)[0].lower(), path.lower(), base.lower(),
+                 os.path.splitext(base)[0].lower()}
+        if key and key in names:
+            return doc
+    titles = ", ".join(str(call(d, "GetTitle")) for d in docs) or "none"
+    raise SWError(f"No open document called '{name}'. Open documents: {titles}.")
 
 
 def rebuild(doc: Any) -> None:
@@ -731,14 +948,97 @@ def sketch_axes(doc: Any) -> str:
             f"sketch Y along model {fmt_vec(uy)}.")
 
 
+SKETCH_PICK_TOLERANCE_MM = 0.5
+
+
+def _sketch_xy(p: Any) -> tuple[float, float]:
+    """A sketch point's coordinates in mm (sketch system)."""
+    return float(call(p, "X")) / MM, float(call(p, "Y")) / MM
+
+
+def _segment_distance(seg: Any, x: float, y: float) -> float | None:
+    """Distance (mm, sketch plane) from (x, y) to a line or arc; None for other segment types."""
+    kind = call(seg, "GetType")
+    if kind == SW_SKETCH_LINE:
+        line = _as(seg, IID_SKETCH_LINE)
+        (ax, ay), (bx, by) = _sketch_xy(call(line, "GetStartPoint2")), _sketch_xy(call(line, "GetEndPoint2"))
+        dx, dy = bx - ax, by - ay
+        t = 0.0 if dx == dy == 0 else max(0.0, min(1.0, ((x - ax) * dx + (y - ay) * dy) / (dx * dx + dy * dy)))
+        return math.hypot(x - ax - t * dx, y - ay - t * dy)
+    if kind == SW_SKETCH_ARC:
+        arc = _as(seg, IID_SKETCH_ARC)
+        cx, cy = _sketch_xy(call(arc, "GetCenterPoint2"))
+        r = float(call(arc, "GetRadius")) / MM
+        s, e = _sketch_xy(call(arc, "GetStartPoint2")), _sketch_xy(call(arc, "GetEndPoint2"))
+        on_circle = abs(math.hypot(x - cx, y - cy) - r)
+        if math.dist(s, e) < 1e-6:          # full circle
+            return on_circle
+        if call(arc, "GetRotationDir") < 0:  # clockwise from start to end = counter-clockwise from end
+            s, e = e, s
+        a_s, a_e, a_p = (math.atan2(py - cy, px - cx) for px, py in (s, e, (x, y)))
+        if (a_p - a_s) % math.tau <= (a_e - a_s) % math.tau + 1e-9:
+            return on_circle
+        return min(math.dist((x, y), s), math.dist((x, y), e))
+    return None
+
+
+def _pick_sketch(doc: Any, x_mm: float, y_mm: float, point: bool) -> tuple[Any, float, bool]:
+    """Nearest sketch segment (or point) to (x, y) mm: (entity, distance mm, other_types_present)."""
+    sketch = doc.SketchManager.ActiveSketch
+    best, best_d, unknown = None, math.inf, False
+    if point:
+        for p in call(sketch, "GetSketchPoints2") or ():
+            d = math.dist((x_mm, y_mm), _sketch_xy(p))
+            if d < best_d:
+                best, best_d = p, d
+        return best, best_d, False
+    for seg in call(sketch, "GetSketchSegments") or ():
+        d = _segment_distance(seg, x_mm, y_mm)
+        if d is None:
+            unknown = True
+        elif d < best_d:
+            best, best_d = seg, d
+    return best, best_d, unknown
+
+
 def select_sketch_entity(doc: Any, x_mm: float, y_mm: float, point: bool = False,
                          append: bool = True, mark: int = 0) -> None:
-    """Selects the sketch segment (or sketch point) through (x, y) in sketch coordinates."""
+    """Selects the sketch segment (or sketch point) through (x, y) in sketch coordinates.
+
+    Geometric search over the sketch's lines, arcs and points: SelectByID2 picks through the
+    screen and can grab a neighbouring entity (or a whole rectangle) depending on the zoom.
+    Ellipses and splines, which are not measured here, fall back to SelectByID2."""
     kind = "SKETCHPOINT" if point else "SKETCHSEGMENT"
     try:
-        select_at(doc, kind, sketch_to_model(doc, x_mm, y_mm), append, mark)
-    except SWError:
-        raise SWError(f"No {ENTITY_NAMES[kind]} found at ({x_mm:g}, {y_mm:g}) in the sketch.") from None
+        entity, dist, unknown = _pick_sketch(doc, x_mm, y_mm, point)
+    except Exception:  # geometry not readable: let SolidWorks pick
+        entity, dist, unknown = None, math.inf, True
+    if entity is not None and dist <= SKETCH_PICK_TOLERANCE_MM:
+        data = call(doc.SelectionManager, "CreateSelectData")
+        data.Mark = mark
+        if not entity.Select4(append, data):
+            raise SWError("SolidWorks refused the selection.")
+        return
+    if unknown or entity is None:
+        try:
+            select_at(doc, kind, sketch_to_model(doc, x_mm, y_mm), append, mark)
+            return
+        except SWError:
+            pass
+    near = f" (the nearest is {dist:.2f} mm away)" if entity is not None else ""
+    raise SWError(f"No {ENTITY_NAMES[kind]} found at ({x_mm:g}, {y_mm:g}) in the sketch{near}.")
+
+
+def sketch_signature(doc: Any) -> tuple:
+    """Count and total length of the open sketch's segments, to tell whether an edit changed it."""
+    segs = call(doc.SketchManager.ActiveSketch, "GetSketchSegments") or ()
+    total = 0.0
+    for s in segs:
+        try:
+            total += float(call(s, "GetLength"))
+        except Exception:
+            pass
+    return len(segs), round(total / MM, 4)
 
 
 # --------------------------------------------------------------------------- #
@@ -968,23 +1268,35 @@ async def new_part() -> str:
 
 @mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": True,
                        "idempotentHint": True, "openWorldHint": False})
-async def save_document(path: str = "", overwrite: bool = False) -> str:
+async def save_document(path: str = "", overwrite: bool = False, new_version: bool = False) -> str:
     """Saves the active document.
     With 'path' (e.g. C:\\\\projects\\\\part.SLDPRT, .step, .stl, .pdf...)
     saves/exports to that file: the format is taken from the extension. When the user has set a
     projects folder, relative paths are confined to it and missing folders inside it are created.
-    If the target file already exists, overwrite must be True or the save is rejected."""
+    If the target file already exists, overwrite must be True or the save is rejected.
+    new_version=True (no path) saves the document as the next version next to its current file
+    (bracket_v1_base.SLDPRT -> bracket_v2_base.SLDPRT), never overwriting: the open document
+    then becomes the new file and the previous version is kept unchanged.
+    Without path or new_version, the document's own file is overwritten."""
     def work():
         doc = active_doc()
+        if new_version:
+            if path:
+                raise SWError("Give either path or new_version=True, not both.")
+            current = call(doc, "GetPathName")
+            if not current:
+                raise SWError("The document was never saved: save it once with a path (e.g. "
+                              "'<project>/cad/<project>_v1_<description>.SLDPRT').")
+            target = resolve_save_path(next_version_path(current))
+            err = doc.SaveAs3(target, 0, SW_SAVE_SILENT)
+            if err != 0 or not os.path.exists(target):
+                raise SWError(f"Save failed (SolidWorks error code {err}).")
+            return f"Saved as new version {target}; {os.path.basename(current)} is kept unchanged."
         if not path:
             target = call(doc, "GetPathName")
             if not target:
                 raise SWError("The document was never saved: give a full path.")
-            if CONFIG.projects_directory:
-                norm_root = os.path.normcase(os.path.abspath(CONFIG.projects_directory))
-                norm_target = os.path.normcase(os.path.abspath(target))
-                if not (norm_target == norm_root or norm_target.startswith(norm_root + os.sep)):
-                    raise SWError(f"Access denied: document '{target}' is outside the configured projects directory.")
+            check_inside_projects(target)
             ok = doc.Save3(SW_SAVE_SILENT, VARIANT(pythoncom.VT_BYREF | pythoncom.VT_I4, 0),
                            VARIANT(pythoncom.VT_BYREF | pythoncom.VT_I4, 0))
             if not ok:
@@ -1044,6 +1356,109 @@ async def export_document(formats: list[str] | None = None, directory: str = "")
                               + (f" Already written: {', '.join(written)}." if written else ""))
             written.append(target)
         return "Exported:\n" + "\n".join(written)
+    return await com_tool(work)
+
+
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
+                       "idempotentHint": True, "openWorldHint": False})
+async def open_document(path: str, read_only: bool = False) -> str:
+    """Opens a part, assembly or drawing (.SLDPRT / .SLDASM / .SLDDRW) and makes it the active
+    document, to continue work on it. A relative path is relative to the projects folder.
+    If the file is already open it is just brought to the front. read_only=True opens it so that
+    it cannot be saved over. The file itself is not modified. Starts SolidWorks if needed."""
+    def work():
+        full = resolve_open_path(path)
+        sw = get_sw()
+        already = call(sw, "GetOpenDocumentByName", full) is not None
+        errors = VARIANT(pythoncom.VT_BYREF | pythoncom.VT_I4, 0)
+        warnings = VARIANT(pythoncom.VT_BYREF | pythoncom.VT_I4, 0)
+        options = SW_OPEN_SILENT | (SW_OPEN_READ_ONLY if read_only else 0)
+        doc = sw.OpenDoc6(full, DOC_EXTENSIONS[os.path.splitext(full)[1].lower()], options, "", errors, warnings)
+        if doc is None:
+            code = int(getattr(errors, "value", 0) or 0)
+            reasons = [text for bit, text in OPEN_ERRORS.items() if code & bit]
+            raise SWError(f"Could not open {full}: {', '.join(reasons) or f'SolidWorks error {code}'}.")
+        title = call(doc, "GetTitle")
+        sw.ActivateDoc3(title, False, SW_DONT_REBUILD_ON_ACTIVATION, VARIANT(pythoncom.VT_BYREF | pythoncom.VT_I4, 0))
+        kind = DOC_TYPE_NAMES.get(call(doc, "GetType"), "document")
+        state = " (read-only)" if call(doc, "IsOpenedReadOnly") else ""
+        note = "It was already open: switched to it. " if already else ""
+        return (f"{note}{kind} '{title}' is now the active document{state}. "
+                "Use get_feature_tree to see how it is built.")
+    return await com_tool(work)
+
+
+@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False,
+                       "idempotentHint": True, "openWorldHint": False})
+async def list_open_documents() -> OpenDocuments:
+    """Documents open in SolidWorks: title, path, type, whether they have unsaved changes, whether
+    they have a window (parts loaded only by an assembly have none) and which one is active."""
+    def work():
+        sw = get_sw()
+        active = sw.ActiveDoc
+        docs: list[OpenDocument] = []
+        for doc in open_documents(sw):
+            docs.append({
+                "title": str(call(doc, "GetTitle")),
+                "path": str(call(doc, "GetPathName") or ""),
+                "type": DOC_TYPE_NAMES.get(call(doc, "GetType"), "Other"),
+                "modified": bool(call(doc, "GetSaveFlag")),
+                "visible": bool(call(doc, "Visible")),
+                "read_only": bool(call(doc, "IsOpenedReadOnly")),
+            })
+        return {"active": str(call(active, "GetTitle")) if active is not None else None,
+                "count": len(docs), "documents": docs}
+    return await com_tool(work)
+
+
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
+                       "idempotentHint": True, "openWorldHint": False})
+async def activate_document(name: str) -> str:
+    """Makes an open document the active one (brings its window to the front), by title, file
+    name or full path as shown by list_open_documents. Every other tool works on the active document."""
+    def work():
+        sw = get_sw()
+        doc = find_open_doc(sw, name)
+        title = call(doc, "GetTitle")
+        sw.ActivateDoc3(title, False, SW_DONT_REBUILD_ON_ACTIVATION, VARIANT(pythoncom.VT_BYREF | pythoncom.VT_I4, 0))
+        active = sw.ActiveDoc
+        if active is None or call(active, "GetTitle") != title:
+            raise SWError(f"'{title}' is only loaded by an assembly and has no window: open it with "
+                          "open_document and its path.")
+        return f"'{title}' is now the active document."
+    return await com_tool(work)
+
+
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": True,
+                       "idempotentHint": False, "openWorldHint": False})
+async def close_document(name: str = "", save: bool = False, discard_changes: bool = False) -> str:
+    """Closes a document (by title, file name or path; empty = the active one).
+    With unsaved changes it refuses, unless save=True (saves over its own file first, which must be
+    inside the projects folder) or discard_changes=True (the unsaved changes are LOST)."""
+    def work():
+        sw = get_sw()
+        doc = find_open_doc(sw, name) if name.strip() else active_doc()
+        title, target = call(doc, "GetTitle"), call(doc, "GetPathName")
+        how = ""
+        if call(doc, "GetSaveFlag"):
+            if save:
+                if not target:
+                    raise SWError(f"'{title}' was never saved: save it with save_document and a path first.")
+                check_inside_projects(target)
+                ok = doc.Save3(SW_SAVE_SILENT, VARIANT(pythoncom.VT_BYREF | pythoncom.VT_I4, 0),
+                               VARIANT(pythoncom.VT_BYREF | pythoncom.VT_I4, 0))
+                if not ok:
+                    raise SWError(f"Could not save '{title}': it was not closed.")
+                how = " after saving it"
+            elif discard_changes:
+                how = ", unsaved changes discarded"
+            else:
+                raise SWError(f"'{title}' has unsaved changes: pass save=True to save them first, or "
+                              "discard_changes=True to lose them.")
+        sw.CloseDoc(title)
+        active = sw.ActiveDoc
+        now = f"Active document: {call(active, 'GetTitle')}." if active is not None else "No document is active."
+        return f"Closed '{title}'{how}. {now}"
     return await com_tool(work)
 
 
@@ -1418,6 +1833,228 @@ async def select_edge_at_point(x_mm: float, y_mm: float, z_mm: float, append: bo
     return await com_tool(work)
 
 
+# ------------------------- Topology (faces and edges) ---------------------- #
+def _mm(values: Any, digits: int = 3) -> list[float]:
+    return [round(float(v) / MM, digits) + 0.0 for v in values]
+
+
+def _unit(values: Any) -> list[float]:
+    v = [float(x) for x in values]
+    n = math.sqrt(sum(x * x for x in v)) or 1.0
+    return [round(x / n, 4) + 0.0 for x in v]
+
+
+def _feature_name(face: Any) -> str:
+    try:
+        feat = call(face, "GetFeature")
+        return str(call(feat, "Name")) if feat is not None else ""
+    except Exception:
+        return ""
+
+
+def _face_kind(surf: Any) -> str:
+    for kind in ("Plane", "Cylinder", "Cone", "Sphere", "Torus"):
+        try:
+            if call(surf, f"Is{kind}"):
+                return kind.lower()
+        except Exception:
+            pass
+    return "other"
+
+
+def _point_inside_face(face: Any) -> list[float]:
+    """A point (m) on the face and inside its boundary, away from its edges.
+
+    The centroid of the largest display triangle lies inside the face; projecting it back onto
+    the face removes the chord error on curved faces. The centre of the face box is the fallback.
+    """
+    guess = None
+    try:
+        tris = list(face.GetTessTriangles(True) or ())
+        best = -1.0
+        for i in range(0, len(tris) - 8, 9):
+            a, b, c = tris[i:i + 3], tris[i + 3:i + 6], tris[i + 6:i + 9]
+            u = [b[k] - a[k] for k in range(3)]
+            v = [c[k] - a[k] for k in range(3)]
+            cross = (u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0])
+            area = math.sqrt(sum(x * x for x in cross))
+            if area > best:
+                best, guess = area, [(a[k] + b[k] + c[k]) / 3 for k in range(3)]
+    except Exception:
+        guess = None
+    if guess is None:
+        box = list(call(face, "GetBox"))
+        guess = [(box[k] + box[k + 3]) / 2 for k in range(3)]
+    return list(face.GetClosestPointOn(*guess))[:3]
+
+
+def face_info(face: Any) -> FaceInfo:
+    """Type, a pick point and the main geometry of a face (mm)."""
+    surf = call(face, "GetSurface")
+    kind = _face_kind(surf)
+    point = _point_inside_face(face)
+    info: FaceInfo = {"type": kind, "point_mm": _mm(point),
+                      "area_mm2": round(float(call(face, "GetArea")) / MM ** 2, 2)}
+    if kind == "plane":
+        info["normal"] = _unit(call(face, "Normal"))
+    elif kind in ("cylinder", "cone"):
+        p = list(call(surf, "CylinderParams" if kind == "cylinder" else "ConeParams"))
+        origin, axis = p[0:3], _unit(p[3:6])
+        info.update(axis=axis, axis_point_mm=_mm(origin), diameter_mm=round(2 * float(p[6]) / MM, 3))
+        if kind == "cylinder":
+            try:   # face normal = surface normal, reversed when FaceInSurfaceSense is True
+                n = list(surf.EvaluateAtPoint(*point))[:3]
+                if call(face, "FaceInSurfaceSense"):
+                    n = [-x for x in n]
+                radial = [point[k] - origin[k] for k in range(3)]
+                along = sum(radial[k] * axis[k] for k in range(3))
+                radial = [radial[k] - along * axis[k] for k in range(3)]
+                info["concave"] = sum(n[k] * radial[k] for k in range(3)) < 0
+            except Exception:
+                pass
+    elif kind == "sphere":
+        p = list(call(surf, "SphereParams"))
+        info.update(axis_point_mm=_mm(p[0:3]), diameter_mm=round(2 * float(p[3]) / MM, 3))
+    feature = _feature_name(face)
+    if feature:
+        info["feature"] = feature
+    return info
+
+
+def _curve_kind(curve: Any) -> str:
+    for kind, test in (("line", "IsLine"), ("circle", "IsCircle"), ("ellipse", "IsEllipse"), ("spline", "IsBcurve")):
+        try:
+            if call(curve, test):
+                return kind
+        except Exception:
+            pass
+    return "other"
+
+
+def _edge_kind(edge: Any) -> str:
+    """Edge type as edge_info reports it, without the rest of the geometry."""
+    kind = _curve_kind(call(edge, "GetCurve"))   # GetCurve must come before GetCurveParams2
+    if kind == "circle":
+        p = list(call(edge, "GetCurveParams2"))
+        return "circle" if math.dist(p[0:3], p[3:6]) < 1e-9 else "arc"
+    return kind
+
+
+def edge_info(edge: Any) -> EdgeInfo:
+    """Type, mid-point (to pick it), length and the main geometry of an edge (mm)."""
+    curve = call(edge, "GetCurve")
+    kind = _curve_kind(curve)
+    params = list(call(edge, "GetCurveParams2"))   # start xyz, end xyz, start t, end t, ...
+    start, end, t0, t1 = params[0:3], params[3:6], float(params[6]), float(params[7])
+    try:
+        mid = list(curve.Evaluate2((t0 + t1) / 2, 0))[:3]
+    except Exception:
+        mid = [(start[k] + end[k]) / 2 for k in range(3)]
+    point = list(edge.GetClosestPointOn(*mid))[:3]
+    info: EdgeInfo = {"type": kind, "point_mm": _mm(point)}
+    try:
+        info["length_mm"] = round(abs(float(curve.GetLength3(min(t0, t1), max(t0, t1)))) / MM, 3)
+    except Exception:
+        pass
+    closed = math.dist(start, end) < 1e-9
+    if kind == "circle":
+        c = list(call(curve, "CircleParams"))   # centre xyz, axis xyz, radius
+        info.update(center_mm=_mm(c[0:3]), axis=_unit(c[3:6]), diameter_mm=round(2 * float(c[6]) / MM, 3))
+        if not closed:
+            info["type"] = "arc"
+    if not closed:
+        info.update(start_mm=_mm(start), end_mm=_mm(end))
+    try:
+        names = [_feature_name(f) for f in call(edge, "GetTwoAdjacentFaces2") or () if f is not None]
+        info["features"] = sorted({n for n in names if n})
+    except Exception:
+        pass
+    return info
+
+
+def _part_faces(doc: Any, feature: str) -> list[Any]:
+    if feature:
+        return list(call(find_feature(doc, feature), "GetFaces") or ())
+    faces = []
+    for body in doc.GetBodies2(0, True) or ():   # visible solid bodies
+        faces.extend(call(body, "GetFaces") or ())
+    return faces
+
+
+def _part_edges(doc: Any, feature: str) -> list[Any]:
+    if not feature:
+        edges = []
+        for body in doc.GetBodies2(0, True) or ():
+            edges.extend(call(body, "GetEdges") or ())
+        return edges
+    edges, seen = [], set()
+    for face in _part_faces(doc, feature):
+        for edge in call(face, "GetEdges") or ():
+            try:   # shared edges come back once per face: keep one
+                call(edge, "GetCurve")   # GetCurveParams2 needs the curve to be generated first
+                key = tuple(round(float(v), 7) for v in list(call(edge, "GetCurveParams2"))[:6])
+            except Exception:
+                key = (id(edge),)
+            if key not in seen:
+                seen.add(key)
+                edges.append(edge)
+    return edges
+
+
+@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False,
+                       "idempotentHint": True, "openWorldHint": False})
+async def list_faces(feature: str = "",
+                     face_type: Literal["any", "plane", "cylinder", "cone", "sphere", "torus", "other"] = "any",
+                     limit: Annotated[int, Field(ge=1, le=500, description="Maximum number of faces returned")] = 60) -> FaceList:
+    """Faces of the active part (or only those created by 'feature'), each with its type, a point
+    lying ON it (point_mm, model coordinates: pass it to select_face_at_point, hole, shell,
+    fillet face_points, create_plane face_point...), area, outward normal of planar faces, and
+    diameter / axis of cylinders (concave=True for holes). Use it instead of guessing coordinates."""
+    def work():
+        doc = active_doc(SW_DOC_PART)
+        found: list[FaceInfo] = []
+        total = 0
+        for face in _part_faces(doc, feature):
+            if face_type != "any" and _face_kind(call(face, "GetSurface")) != face_type:
+                continue
+            total += 1
+            if len(found) < limit:
+                info = face_info(face)
+                info["index"] = total
+                found.append(info)
+        if not total and not feature and not doc.GetBodies2(0, True):
+            raise SWError("The part has no solid geometry yet.")
+        return {"count": len(found), "total": total, "truncated": total > len(found), "faces": found}
+    return await com_tool(work)
+
+
+@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False,
+                       "idempotentHint": True, "openWorldHint": False})
+async def list_edges(feature: str = "",
+                     edge_type: Literal["any", "line", "circle", "arc", "ellipse", "spline", "other"] = "any",
+                     limit: Annotated[int, Field(ge=1, le=500, description="Maximum number of edges returned")] = 80) -> EdgeList:
+    """Edges of the active part (or only those of the faces created by 'feature'), each with its
+    type, its mid-point (point_mm, lying ON the edge: pass it to fillet / chamfer edge_points,
+    select_edge_at_point, circular_pattern axis_edge_point...), length, end points, and centre /
+    diameter of circles and arcs. Use it instead of guessing coordinates."""
+    def work():
+        doc = active_doc(SW_DOC_PART)
+        found: list[EdgeInfo] = []
+        total = 0
+        for edge in _part_edges(doc, feature):
+            if edge_type != "any" and _edge_kind(edge) != edge_type:
+                continue
+            total += 1
+            if len(found) < limit:
+                info = edge_info(edge)
+                info["index"] = total
+                found.append(info)
+        if not total and not feature and not doc.GetBodies2(0, True):
+            raise SWError("The part has no solid geometry yet.")
+        return {"count": len(found), "total": total, "truncated": total > len(found), "edges": found}
+    return await com_tool(work)
+
+
 # --------------------------------- Sketches -------------------------------- #
 @mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
                        "idempotentHint": False, "openWorldHint": False})
@@ -1679,6 +2316,251 @@ async def convert_entities(face_points: list[list[float]] | None = None,
         if not ok:
             raise SWError("Convert Entities failed.")
         return "Edges converted into the sketch."
+    return await com_tool(work)
+
+
+IID_SKETCH_LINE = pywintypes.IID("{83A33DC1-27C5-11CE-BFD4-00400513BB57}")   # ISketchLine
+IID_SKETCH_ARC = pywintypes.IID("{83A33DC3-27C5-11CE-BFD4-00400513BB57}")    # ISketchArc
+
+
+def _as(obj: Any, iid: Any) -> Any:
+    """The same COM object seen through another of its interfaces (late binding)."""
+    return win32com.client.dynamic.Dispatch(obj._oleobj_.QueryInterface(iid, pythoncom.IID_IDispatch))
+
+
+def segment_count(doc: Any) -> int:
+    """Number of sketch segments in the open sketch."""
+    return len(call(doc.SketchManager.ActiveSketch, "GetSketchSegments") or ())
+
+
+def select_sketch_entities(doc: Any, points: list[list[float]], mark: int = 0) -> None:
+    """Replaces the selection with the sketch segments through the points [[x, y], ...]."""
+    if not points or any(len(p) != 2 for p in points):
+        raise SWError("Give one [x, y] point (sketch coordinates) on each sketch entity.")
+    doc.ClearSelection2(True)
+    for x, y in points:
+        select_sketch_entity(doc, x, y, mark=mark)
+
+
+def selected_segments_center(doc: Any, fallback: list[list[float]]) -> tuple[float, float]:
+    """Centre (mm, sketch coordinates) of the box around the selected sketch segments.
+
+    Lines count with their end points, arcs and circles with their full circle; other
+    entities with the point used to pick them."""
+    xs, ys = [], []
+    sel = doc.SelectionManager
+    for i in range(1, sel.GetSelectedObjectCount2(-1) + 1):
+        seg = sel.GetSelectedObject6(i, -1)
+        try:
+            kind = call(seg, "GetType")
+            if kind == SW_SKETCH_LINE:
+                line = _as(seg, IID_SKETCH_LINE)
+                for p in (call(line, "GetStartPoint2"), call(line, "GetEndPoint2")):
+                    xs.append(float(call(p, "X")) / MM)
+                    ys.append(float(call(p, "Y")) / MM)
+                continue
+            if kind == SW_SKETCH_ARC:
+                arc = _as(seg, IID_SKETCH_ARC)
+                c, r = call(arc, "GetCenterPoint2"), float(call(arc, "GetRadius")) / MM
+                cx, cy = float(call(c, "X")) / MM, float(call(c, "Y")) / MM
+                xs += [cx - r, cx + r]
+                ys += [cy - r, cy + r]
+                continue
+        except Exception:
+            pass
+        if i <= len(fallback):
+            xs.append(float(fallback[i - 1][0]))
+            ys.append(float(fallback[i - 1][1]))
+    if not xs:
+        raise SWError("Could not read the selected sketch entities: give reference_x_mm / reference_y_mm.")
+    return (min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2
+
+
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
+                       "idempotentHint": False, "openWorldHint": False})
+async def sketch_point(x_mm: float, y_mm: float) -> str:
+    """Adds a sketch point at (x, y) mm in the open sketch (e.g. a reference for dimensions or a
+    hole position)."""
+    def work():
+        sm = require_sketch(active_doc(SW_DOC_PART))
+        if sm.CreatePoint(x_mm * MM, y_mm * MM, 0) is None:
+            raise SWError("Point not created.")
+        return f"Point at ({x_mm}, {y_mm})."
+    return await com_tool(work)
+
+
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": True,
+                       "idempotentHint": False, "openWorldHint": False})
+async def sketch_trim(x_mm: float, y_mm: float) -> str:
+    """Trims the sketch entity through (x, y) in the open sketch back to its nearest intersections
+    with other entities: the piece you point at is removed (like Trim to closest). An entity that
+    crosses nothing is deleted entirely. Replaces the selection."""
+    def work():
+        doc = active_doc(SW_DOC_PART)
+        sm = require_sketch(doc)
+        doc.ClearSelection2(True)
+        select_sketch_entity(doc, x_mm, y_mm, append=False)
+        try:
+            seg = _pick_sketch(doc, x_mm, y_mm, False)[0]
+            seg_len = float(call(seg, "GetLength")) / MM if seg is not None else None
+        except Exception:
+            seg_len = None
+        before = sketch_signature(doc)
+        # The pick point is in SKETCH coordinates (metres). SketchTrim returns False even when it
+        # trims, so the result is judged from the geometry.
+        sm.SketchTrim(SW_TRIM_CLOSEST, x_mm * MM, y_mm * MM, 0.0)
+        doc.ClearSelection2(True)
+        after = sketch_signature(doc)
+        if after == before:
+            raise SWError(f"Nothing was trimmed at ({x_mm:g}, {y_mm:g}): point at the piece to remove.")
+        # Only a piece of the entity under the point may go, and the point must be free afterwards.
+        wrong = seg_len is not None and not 0 < before[1] - after[1] <= seg_len + 1e-3
+        try:
+            wrong = wrong or _pick_sketch(doc, x_mm, y_mm, False)[1] < 1e-3
+        except Exception:
+            pass
+        if wrong:
+            doc.EditUndo2(1)
+            raise SWError(f"SolidWorks trimmed something other than the piece at ({x_mm:g}, {y_mm:g}), so the "
+                          "trim was undone. Point at the middle of the piece to remove, or delete the entity "
+                          "with delete_sketch_entity and redraw it.")
+        return f"Entity trimmed at ({x_mm}, {y_mm})."
+    return await com_tool(work)
+
+
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
+                       "idempotentHint": False, "openWorldHint": False})
+async def sketch_mirror(entity_points: list[list[float]], mirror_line_point: list[float]) -> str:
+    """Mirrors sketch entities of the open sketch about a construction line (sketch_line with
+    construction=True). entity_points: [[x, y], ...] one point on each entity to mirror;
+    mirror_line_point: [x, y] a point on the construction line. Replaces the selection."""
+    def work():
+        if len(mirror_line_point) != 2:
+            raise SWError("mirror_line_point must be [x, y].")
+        doc = active_doc(SW_DOC_PART)
+        require_sketch(doc)
+        before = segment_count(doc)
+        select_sketch_entities(doc, entity_points, mark=1)
+        select_sketch_entity(doc, mirror_line_point[0], mirror_line_point[1], mark=2)
+        doc.SketchMirror()
+        doc.ClearSelection2(True)
+        added = segment_count(doc) - before
+        if added <= 0:
+            raise SWError("Nothing was mirrored: the mirror line must be a construction line "
+                          "(sketch_line construction=True).")
+        return f"Mirrored {len(entity_points)} entities ({added} new segments)."
+    return await com_tool(work)
+
+
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
+                       "idempotentHint": False, "openWorldHint": False})
+async def sketch_linear_pattern(entity_points: list[list[float]],
+                                count_x: Annotated[int, Field(ge=1, description="Instances along the first direction, original included")],
+                                spacing_x_mm: Annotated[float, Field(ge=0, description="Spacing along the first direction in mm")],
+                                angle_x_deg: float = 0.0,
+                                count_y: Annotated[int, Field(ge=1, description="Instances along the second direction, original included")] = 1,
+                                spacing_y_mm: Annotated[float, Field(ge=0, description="Spacing along the second direction in mm")] = 0.0,
+                                angle_y_deg: float = 90.0) -> str:
+    """Repeats sketch entities of the open sketch in a row or a grid (e.g. a row of holes before
+    one cut). entity_points: [[x, y], ...] one point on each entity. count_x copies spacing_x_mm
+    apart along the direction at angle_x_deg from sketch X; count_y / spacing_y_mm / angle_y_deg
+    add a second direction. Replaces the selection."""
+    def work():
+        if count_x * count_y < 2:
+            raise SWError("The pattern needs at least 2 instances in total.")
+        if (count_x > 1 and spacing_x_mm <= 0) or (count_y > 1 and spacing_y_mm <= 0):
+            raise SWError("Each direction with more than one instance needs a positive spacing.")
+        doc = active_doc(SW_DOC_PART)
+        sm = require_sketch(doc)
+        before = segment_count(doc)
+        select_sketch_entities(doc, entity_points)
+        ok = sm.CreateLinearSketchStepAndRepeat(count_x, count_y, spacing_x_mm * MM, spacing_y_mm * MM,
+                                                angle_x_deg * DEG, angle_y_deg * DEG, "",
+                                                False, False, False, False, False)
+        doc.ClearSelection2(True)
+        if not ok or segment_count(doc) <= before:
+            raise SWError("Linear sketch pattern not created.")
+        return f"Linear sketch pattern: {count_x} x {count_y} instances."
+    return await com_tool(work)
+
+
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
+                       "idempotentHint": False, "openWorldHint": False})
+async def sketch_circular_pattern(entity_points: list[list[float]],
+                                  count: Annotated[int, Field(ge=2, description="Instances, original included (>= 2)")],
+                                  center_x_mm: float = 0.0, center_y_mm: float = 0.0,
+                                  angle_deg: Annotated[float, Field(gt=0, le=360, description="Total angle in degrees")] = 360.0,
+                                  reference_x_mm: float | None = None, reference_y_mm: float | None = None,
+                                  rotate: bool = True) -> str:
+    """Repeats sketch entities of the open sketch around a centre (e.g. bolt holes on a flange
+    before one cut). entity_points: [[x, y], ...] one point on each entity; the copies are spread
+    evenly over angle_deg around (center_x_mm, center_y_mm). The entities' centre is computed
+    (for a circle: its centre); give reference_x_mm / reference_y_mm to set it explicitly.
+    rotate=False keeps the copies' orientation. Replaces the selection."""
+    def work():
+        doc = active_doc(SW_DOC_PART)
+        sm = require_sketch(doc)
+        before = segment_count(doc)
+        select_sketch_entities(doc, entity_points)
+        if reference_x_mm is not None and reference_y_mm is not None:
+            rx, ry = reference_x_mm, reference_y_mm
+        else:
+            rx, ry = selected_segments_center(doc, entity_points)
+        radius = math.hypot(center_x_mm - rx, center_y_mm - ry)
+        if radius < 1e-6:
+            doc.ClearSelection2(True)
+            raise SWError("The entities sit on the pattern centre: move the centre or the entities.")
+        direction = math.atan2(center_y_mm - ry, center_x_mm - rx)   # from the entities to the centre
+        step = angle_deg / count if angle_deg >= 360 else angle_deg / (count - 1)
+        ok = sm.CreateCircularSketchStepAndRepeat(radius * MM, direction % (2 * math.pi), count, step * DEG,
+                                                  rotate, "", False, False, False)
+        doc.ClearSelection2(True)
+        if not ok or segment_count(doc) <= before:
+            raise SWError("Circular sketch pattern not created.")
+        return (f"Circular sketch pattern: {count} instances over {angle_deg} degrees around "
+                f"({center_x_mm}, {center_y_mm}), radius {round(radius, 3)} mm.")
+    return await com_tool(work)
+
+
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": True,
+                       "idempotentHint": False, "openWorldHint": False})
+async def delete_sketch_entity(points: list[list[float]]) -> str:
+    """Deletes sketch entities of the open sketch: one [x, y] point on each, in sketch
+    coordinates. Their relations and dimensions are deleted with them."""
+    def work():
+        doc = active_doc(SW_DOC_PART)
+        require_sketch(doc)
+        before = segment_count(doc)
+        select_sketch_entities(doc, points)
+        doc.EditDelete()
+        doc.ClearSelection2(True)
+        removed = before - segment_count(doc)
+        if removed <= 0:
+            raise SWError("Nothing was deleted.")
+        return f"Deleted {removed} sketch entities."
+    return await com_tool(work)
+
+
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
+                       "idempotentHint": False, "openWorldHint": False})
+async def edit_sketch(name: str) -> str:
+    """Reopens an existing sketch (name from get_feature_tree, e.g. "Sketch1") to change it with
+    the sketch tools; a sketch already open is closed first. Close it with end_sketch: the
+    features built on it then update."""
+    def work():
+        doc = active_doc(SW_DOC_PART)
+        leave_sketch(doc)
+        feat = find_feature(doc, name)
+        if call(feat, "GetTypeName2") != "ProfileFeature":
+            raise SWError(f"'{name}' is not a sketch (see get_feature_tree).")
+        doc.ClearSelection2(True)
+        if not feat.Select2(False, 0):
+            raise SWError(f"Could not select '{name}'.")
+        doc.EditSketch()
+        doc.ClearSelection2(True)
+        if not in_sketch(doc):
+            raise SWError(f"'{name}' did not open for editing.")
+        return f"Sketch '{name}' open for editing. " + sketch_axes(doc)
     return await com_tool(work)
 
 
@@ -2011,27 +2893,132 @@ async def loft(profile_sketches: list[str], guide_sketches: list[str] | None = N
 
 @mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
                        "idempotentHint": False, "openWorldHint": False})
-async def create_plane(offset_mm: Annotated[float, Field(gt=0, description="Offset distance in mm")],
+async def create_plane(offset_mm: Annotated[float, Field(ge=0, description="Offset distance in mm (offset mode)")] = 0.0,
                        reference: str = "front", face_point: list[float] | None = None,
-                       flip: bool = False) -> str:
-    """Creates a reference plane parallel to another one, offset_mm away (e.g. for loft profiles).
-    reference: "front", "top", "right" or the name of a plane; or give face_point ([x, y, z] mm on a
-    planar face) to offset from that face. flip=True puts it on the other side. Returns its name,
-    to use with select_plane."""
+                       flip: bool = False,
+                       angle_deg: Annotated[float, Field(ge=0, lt=360, description="Angle in degrees (angle mode)")] = 0.0,
+                       axis: str = "", axis_edge_point: list[float] | None = None,
+                       through_points: list[list[float]] | None = None) -> str:
+    """Creates a reference plane and returns its name, to use with select_plane. Three modes:
+
+    offset (default): parallel to 'reference' ("front", "top", "right" or a plane name) or to the
+      planar face through face_point ([x, y, z] mm), offset_mm away; flip=True for the other side.
+    angle: angle_deg > 0 turns the plane by that angle from 'reference' (or the face) about an
+      axis lying in it or parallel to it: axis = "x", "y", "z" (model axes) or the name of a
+      reference axis, or axis_edge_point = a point on a straight edge. flip reverses the angle.
+    through_points: three vertices [[x, y, z], ...] of the part (corners), in mm.
+    Using a model axis the first time adds a hidden reference axis to the tree."""
     def work():
-        if offset_mm <= 0:
-            raise SWError("The offset must be positive (use flip for the other side).")
         doc = active_doc(SW_DOC_PART)
         leave_sketch(doc)
         doc.ClearSelection2(True)
+        fm = doc.FeatureManager
+        if through_points:
+            if len(through_points) != 3:
+                raise SWError("through_points needs exactly three vertices.")
+            for mark, p in enumerate(through_points):
+                select_at(doc, "VERTEX", p, mark=mark)
+            feat = fm.InsertRefPlane(SW_REF_PLANE_COINCIDENT, 0.0, SW_REF_PLANE_COINCIDENT, 0.0,
+                                     SW_REF_PLANE_COINCIDENT, 0.0)
+            name = finish_feature(doc, feat, "Plane not created (are the three points corners of the "
+                                             "part, and not in a line?).")
+            return f"Plane '{name}' created through three vertices."
+        if angle_deg > 0:
+            if not axis and not axis_edge_point:
+                raise SWError("The angle mode needs axis (x, y, z or an axis name) or axis_edge_point.")
+            axis_feat = None
+            if axis and not axis_edge_point:   # before any selection: it may create the axis
+                axis_feat = model_axis(doc, axis)[0] if axis.lower() in AXIS_PLANES else find_feature(doc, axis)
+            doc.ClearSelection2(True)
+            if face_point:
+                select_at(doc, "FACE", face_point, mark=0)
+            elif not plane_feature(doc, reference).Select2(True, 0):
+                raise SWError(f"Could not select '{reference}'.")
+            if axis_edge_point:
+                select_at(doc, "EDGE", axis_edge_point, mark=1)
+            elif not axis_feat.Select2(True, 1):
+                raise SWError(f"Could not select the axis '{axis}'.")
+            flags = SW_REF_PLANE_ANGLE | (SW_REF_PLANE_FLIP if flip else 0)
+            feat = fm.InsertRefPlane(flags, angle_deg * DEG, SW_REF_PLANE_COINCIDENT, 0.0, 0, 0.0)
+            name = finish_feature(doc, feat, "Plane not created: the axis or edge must be straight and lie in "
+                                             "(or be parallel to) the reference plane.")
+            return f"Plane '{name}' created at {angle_deg} degrees from {'the face' if face_point else reference}."
+        if offset_mm <= 0:
+            raise SWError("Give offset_mm > 0 (flip for the other side), angle_deg with an axis, or through_points.")
         if face_point:
             select_at(doc, "FACE", face_point, append=False)
         elif not plane_feature(doc, reference).Select2(False, 0):
             raise SWError(f"Could not select '{reference}'.")
         flags = SW_REF_PLANE_DISTANCE | (SW_REF_PLANE_FLIP if flip else 0)
-        feat = doc.FeatureManager.InsertRefPlane(flags, offset_mm * MM, 0, 0.0, 0, 0.0)
+        feat = fm.InsertRefPlane(flags, offset_mm * MM, 0, 0.0, 0, 0.0)
         name = finish_feature(doc, feat, "Plane not created (is the face planar?).")
         return f"Plane '{name}' created {offset_mm} mm from {'the face' if face_point else reference}."
+    return await com_tool(work)
+
+
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
+                       "idempotentHint": False, "openWorldHint": False})
+async def create_axis(face_point: list[float] | None = None, edge_point: list[float] | None = None,
+                      planes: list[str] | None = None, name: str = "") -> str:
+    """Creates a reference axis, e.g. for a circular pattern, a revolve or an angled plane:
+    face_point = a point on a cylindrical or conical face (its axis, e.g. the axis of a hole);
+    edge_point = a point on a straight edge; or planes = two plane names / "front", "top",
+    "right" (their intersection). name renames it. Returns its name."""
+    def work():
+        given = sum(x is not None and x != [] for x in (face_point, edge_point, planes))
+        if given != 1:
+            raise SWError("Give exactly one of face_point, edge_point or planes.")
+        doc = active_doc(SW_DOC_PART)
+        leave_sketch(doc)
+        doc.ClearSelection2(True)
+        if face_point:
+            select_at(doc, "FACE", face_point)
+        elif edge_point:
+            select_at(doc, "EDGE", edge_point)
+        else:
+            if len(planes) != 2:
+                raise SWError("planes needs exactly two planes.")
+            for plane in planes:
+                if not plane_feature(doc, plane).Select2(True, 0):
+                    raise SWError(f"Could not select '{plane}'.")
+        before = last_feature_name(doc)
+        doc.InsertAxis2(True)
+        feat = new_feature(doc, before, "Axis not created: the face must be cylindrical or conical, the edge "
+                                        "straight, the two planes not parallel.")
+        if name:
+            feat.Name = name
+        return f"Axis '{finish_feature(doc, feat, '')}' created."
+    return await com_tool(work)
+
+
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
+                       "idempotentHint": False, "openWorldHint": False})
+async def draft(angle_deg: Annotated[float, Field(gt=0, lt=90, description="Draft angle in degrees")],
+                face_points: list[list[float]], neutral_plane: str = "",
+                neutral_face_point: list[float] | None = None, flip: bool = False) -> str:
+    """Tilts faces by angle_deg (draft for moulding or casting), pivoting about a neutral plane:
+    neutral_plane = "front", "top", "right" or a plane name, or neutral_face_point = a point on a
+    planar face of the part (e.g. the parting face). face_points: a point on each face to tilt
+    ([x, y, z] mm, model coordinates; see list_faces). flip reverses the pull direction."""
+    def work():
+        if not face_points:
+            raise SWError("Give at least one face to draft in face_points.")
+        if bool(neutral_plane) == bool(neutral_face_point):
+            raise SWError("Give either neutral_plane or neutral_face_point.")
+        doc = active_doc(SW_DOC_PART)
+        leave_sketch(doc)
+        doc.ClearSelection2(True)
+        if neutral_face_point:
+            select_at(doc, "FACE", neutral_face_point, mark=1)
+        elif not plane_feature(doc, neutral_plane).Select2(True, 1):
+            raise SWError(f"Could not select '{neutral_plane}'.")
+        for p in face_points:
+            select_at(doc, "FACE", p, mark=2)
+        feat = doc.FeatureManager.InsertMultiFaceDraft(angle_deg * DEG, flip, False, SW_DRAFT_NO_PROPAGATION,
+                                                       False, False)
+        name = finish_feature(doc, feat, "Draft failed: the faces must meet the neutral plane or face, and "
+                                         "not be parallel to it.")
+        return f"Draft '{name}' created ({angle_deg} degrees on {len(face_points)} faces)."
     return await com_tool(work)
 
 
@@ -2232,6 +3219,24 @@ METRIC_HOLES = {
     "M24":  (25.0, 26.0, 28.0, 21.0, 40.0, 24.8, 45.0),
 }
 HOLE_FITS = {"close": 0, "normal": 1, "loose": 2, "tapped": 3}
+METRIC_PITCH = {"M2": 0.4, "M2.5": 0.45, "M3": 0.5, "M4": 0.7, "M5": 0.8, "M6": 1.0, "M8": 1.25,   # ISO 261 coarse
+                "M10": 1.5, "M12": 1.75, "M14": 2.0, "M16": 2.0, "M20": 2.5, "M24": 3.0}
+
+
+def thread_callout(size: str) -> tuple[float, str]:
+    """Major diameter (mm) and callout of a coarse metric thread: 'm6' -> (6.0, 'M6x1.0')."""
+    key = size.upper().replace(" ", "")
+    if key not in METRIC_PITCH:
+        raise SWError(f"Threads need a metric size: {', '.join(METRIC_PITCH)}.")
+    return float(key[1:]), f"{key}x{METRIC_PITCH[key]:g}" if METRIC_PITCH[key] % 1 else f"{key}x{METRIC_PITCH[key]:.1f}"
+
+
+def _perpendicular(n: tuple[float, float, float]) -> list[float]:
+    """A unit vector perpendicular to n."""
+    helper = (1.0, 0.0, 0.0) if abs(n[0]) < 0.9 else (0.0, 1.0, 0.0)
+    v = [n[1] * helper[2] - n[2] * helper[1], n[2] * helper[0] - n[0] * helper[2], n[0] * helper[1] - n[1] * helper[0]]
+    length = math.sqrt(sum(x * x for x in v))
+    return [x / length for x in v]
 
 
 def hole_sizes(size: str, fit: str, diameter_mm: float, style: str, cbore_d: float, cbore_h: float,
@@ -2306,16 +3311,21 @@ async def hole(centers: list[list[float]], size: str = "",
                counterbore_diameter_mm: Annotated[float, Field(ge=0, description="Counterbore diameter in mm")] = 0.0,
                counterbore_depth_mm: Annotated[float, Field(ge=0, description="Counterbore depth in mm")] = 0.0,
                countersink_diameter_mm: Annotated[float, Field(ge=0, description="Countersink diameter in mm")] = 0.0,
-               countersink_angle_deg: Annotated[float, Field(gt=0, lt=180, description="Countersink angle in degrees (0 < angle < 180)")] = 90.0) -> str:
+               countersink_angle_deg: Annotated[float, Field(gt=0, lt=180, description="Countersink angle in degrees (0 < angle < 180)")] = 90.0,
+               thread: bool = False,
+               thread_depth_mm: Annotated[float, Field(ge=0, description="Thread length in mm (0 = the whole hole)")] = 0.0) -> str:
     """Drills round holes into a planar face, perpendicular to it.
 
     centers: the hole centres [[x, y, z], ...] in mm, model coordinates, all on the SAME face
       (the face is found through the first one).
     size: metric screw size ("M3" ... "M24") with fit: close / normal / loose clearance hole
-      (ISO 273) or tapped = tap drill diameter (no thread is modelled); or give diameter_mm.
+      (ISO 273) or tapped = tap drill diameter; or give diameter_mm.
     depth_mm or through_all=True.
     style: counterbore / countersink for socket head screws; with a metric size their
-      dimensions are standard (ISO 4762 / ISO 10642, 90 degrees), otherwise give them."""
+      dimensions are standard (ISO 4762 / ISO 10642, 90 degrees), otherwise give them.
+    thread=True (with a metric size, fit="tapped", style="simple") adds a cosmetic thread to each
+      hole (e.g. M6x1, shown in drawings and the thread callout), over thread_depth_mm or the
+      whole hole."""
     def work():
         if not centers:
             raise SWError("Give at least one centre.")
@@ -2325,6 +3335,12 @@ async def hole(centers: list[list[float]], size: str = "",
                                          counterbore_depth_mm, countersink_diameter_mm)
         if style == "counterbore" and not through_all and cb_h >= depth_mm:
             raise SWError("The hole must be deeper than the counterbore.")
+        if thread:
+            if fit != "tapped" or style != "simple" or not size:
+                raise SWError('thread=True needs a metric size with fit="tapped" and style="simple".')
+            major, callout = thread_callout(size)
+            if not through_all and thread_depth_mm > depth_mm:
+                raise SWError("The thread cannot be longer than the hole.")
         doc = active_doc(SW_DOC_PART)
         leave_sketch(doc)
         doc.ClearSelection2(True)
@@ -2345,6 +3361,18 @@ async def hole(centers: list[list[float]], size: str = "",
         bottom = [c + (-start) * v for c, v in zip(xyz(centers[0], "centre"), n)]
         names.append(_cut_circles(doc, bottom, centers, d, depth_mm - start, through_all))
         what = "through all" if through_all else f"{depth_mm} mm deep"
+        if thread:
+            u = _perpendicular(n)
+            length = thread_depth_mm or (0.0 if through_all else depth_mm)
+            end = SW_COSMETIC_BLIND if length else SW_COSMETIC_THROUGH
+            for c in centers:   # a point on the rim of each hole, on the face
+                rim = [v + d / 2 * w for v, w in zip(xyz(c, "centre"), u)]
+                doc.ClearSelection2(True)
+                select_at(doc, "EDGE", rim, append=False)
+                feat = doc.FeatureManager.InsertCosmeticThread3(SW_COSMETIC_STANDARD_NONE, "", "", major * MM,
+                                                                end, length * MM, callout)
+                names.append(finish_feature(doc, feat, f"Cosmetic thread on the hole at {c} failed."))
+            done += f", thread {callout}" + (f" {length:g} mm long" if length else "")
         return (f"{len(centers)} hole(s) of {d} mm ({size + ' ' + fit if size else 'custom'}), {what}{done}. "
                 f"Features: {', '.join(names)}.")
     return await com_tool(work)
@@ -2811,6 +3839,77 @@ async def delete_feature(name: str) -> str:
     return await com_tool(work)
 
 
+EXTRUSION_TYPES = {"Extrusion", "Cut", "BossThin", "CutThin", "Boss"}
+EDITABLE_ENDS = {"blind": SW_END_BLIND, "through_all": SW_END_THROUGH_ALL, "midplane": SW_END_MIDPLANE}
+
+
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": True,
+                       "idempotentHint": True, "openWorldHint": False})
+async def edit_feature(name: str, depth_mm: float | None = None,
+                       end_condition: Literal["blind", "through_all", "midplane"] | None = None,
+                       reverse: bool | None = None, depth2_mm: float | None = None) -> str:
+    """Changes an existing extrusion or extruded cut (name from get_feature_tree) and rebuilds:
+    depth_mm, end_condition (blind / through_all / midplane), reverse (direction), depth2_mm
+    (second direction, 0 removes it). Only the values given are replaced. For other features
+    change their dimensions with get_dimensions / set_dimension."""
+    def work():
+        if all(v is None for v in (depth_mm, end_condition, reverse, depth2_mm)):
+            raise SWError("Give at least one value to change.")
+        if (depth_mm is not None and depth_mm <= 0) or (depth2_mm is not None and depth2_mm < 0):
+            raise SWError("depth_mm must be positive and depth2_mm not negative.")
+        doc = active_doc(SW_DOC_PART)
+        leave_sketch(doc)
+        feat = find_feature(doc, name)
+        if call(feat, "GetTypeName2") not in EXTRUSION_TYPES:
+            raise SWError(f"'{name}' is not an extrusion or a cut: change its dimensions with set_dimension.")
+        data = call(feat, "GetDefinition")
+        if not data.AccessSelections(doc, NOTHING):
+            raise SWError(f"SolidWorks did not allow editing '{name}'.")
+        try:
+            if end_condition is not None:
+                data.SetEndCondition(True, EDITABLE_ENDS[end_condition])
+            if depth_mm is not None:
+                data.SetDepth(True, depth_mm * MM)
+            if reverse is not None:
+                data.ReverseDirection = reverse
+            if depth2_mm is not None:
+                data.BothDirections = depth2_mm > 0
+                if depth2_mm > 0:
+                    data.SetEndCondition(False, SW_END_BLIND)
+                    data.SetDepth(False, depth2_mm * MM)
+            ok = feat.ModifyDefinition(data, doc, NOTHING)
+        except Exception:
+            data.ReleaseSelectionAccess()
+            raise
+        if not ok:
+            data.ReleaseSelectionAccess()
+            raise SWError(f"SolidWorks refused the change to '{name}' (midplane cannot have a second direction).")
+        finish_feature(doc, feat, "Undo the change or choose other values.")
+        changes = ", ".join(f"{k} = {v}" for k, v in (("depth_mm", depth_mm), ("end_condition", end_condition),
+                                                      ("reverse", reverse), ("depth2_mm", depth2_mm)) if v is not None)
+        return f"'{name}' changed ({changes}); part rebuilt."
+    return await com_tool(work)
+
+
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
+                       "idempotentHint": False, "openWorldHint": False})
+async def rename_feature(name: str, new_name: str) -> str:
+    """Renames a feature or sketch of the active part (e.g. "Boss-Extrude1" -> "Base plate"), so
+    the tree is readable and dimensions get meaningful names (D1@Base plate)."""
+    def work():
+        if not new_name.strip() or "@" in new_name:
+            raise SWError("The new name must not be empty or contain '@'.")
+        doc = active_doc(SW_DOC_PART)
+        feat = find_feature(doc, name)
+        if any(call(f, "Name") == new_name for f in iter_features(doc)):
+            raise SWError(f"A feature called '{new_name}' already exists.")
+        feat.Name = new_name
+        if call(feat, "Name") != new_name:
+            raise SWError(f"SolidWorks did not accept the name '{new_name}'.")
+        return f"'{name}' renamed to '{new_name}'."
+    return await com_tool(work)
+
+
 @mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
                        "idempotentHint": True, "openWorldHint": False})
 async def zoom_to_fit() -> str:
@@ -2960,6 +4059,10 @@ def main(argv: list[str] | None = None) -> None:
     install_parser.add_argument("--client", choices=["claude", "cursor", "windsurf", "all"], default="claude",
                                 help="Target MCP client (default: claude)")
 
+    # panel subcommand
+    panel_parser = subparsers.add_parser("panel", help="Open the control panel (starts Claude Code, shows status)")
+    panel_parser.add_argument("--workspace", help="work folder Claude Code opens")
+
     parser.add_argument("--transport", choices=TRANSPORTS,
                         default=os.environ.get("SOLIDWORKS_MCP_TRANSPORT", "stdio"),
                         help="stdio (default) for MCP clients that start the server themselves; "
@@ -2976,6 +4079,10 @@ def main(argv: list[str] | None = None) -> None:
     elif args.command == "install":
         from solidworks_mcp.cli import run_install
         sys.exit(run_install(client=args.client))
+    elif args.command == "panel":
+        from solidworks_mcp.panel import main as panel_main
+        panel_main(["--workspace", args.workspace] if args.workspace else [])
+        return
 
     try:
         CONFIG = load_config(args.config)

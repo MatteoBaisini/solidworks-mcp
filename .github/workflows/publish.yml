@@ -1,0 +1,54 @@
+name: publish
+
+# Publishes the package to PyPI as "solidworks-mcp-server" on every version tag (v*).
+# Uses PyPI trusted publishing: no token is stored in the repository. On PyPI the project has
+# a trusted publisher for this repository, this workflow file and the "pypi" environment.
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Check the tag matches the package version
+        run: |
+          version="$(sed -n 's/^__version__ = "\(.*\)"/\1/p' src/solidworks_mcp/__init__.py)"
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match __version__ $version" >&2
+            exit 1
+          fi
+
+      # "solidworks-mcp" is taken on PyPI; the repository keeps it for installs from GitHub.
+      - name: Use the PyPI name
+        run: |
+          sed -i 's/^name = "solidworks-mcp"$/name = "solidworks-mcp-server"/' pyproject.toml
+          grep -q '^name = "solidworks-mcp-server"$' pyproject.toml
+
+      - run: pip install build twine
+      - run: python -m build
+      - run: twine check --strict dist/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/solidworks-mcp-server/
+    permissions:
+      id-token: write   # trusted publishing
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1

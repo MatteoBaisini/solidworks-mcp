@@ -8,15 +8,18 @@
       1. repairs the installation if the server, Claude Code or the work folder is missing,
       2. once a day, checks GitHub for a new server version and installs it
          (only while no Claude Code window is using the server),
-      3. opens Claude Code in the work folder, in Windows Terminal when available.
+      3. opens the control panel (or, with -NoPanel or an older server, Claude Code
+         in the work folder, in Windows Terminal when available).
     Claude Code starts the SolidWorks MCP server itself from the folder's .mcp.json,
     and asks you to log in the first time.
 
+.PARAMETER NoPanel
+    Open Claude Code directly instead of the control panel.
 .PARAMETER NoUpdate
     Skip the daily update check.
 #>
 [CmdletBinding()]
-param([switch]$NoUpdate)
+param([switch]$NoUpdate, [switch]$NoPanel)
 
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'common.ps1')
@@ -71,7 +74,7 @@ try {
             exit 1
         }
     }
-    elseif (-not $NoUpdate -and (Test-UpdateDue $state) -and -not (Get-Process -Name $Script:ToolName -ErrorAction SilentlyContinue)) {
+    elseif (-not $NoUpdate -and (Test-UpdateDue $state) -and -not (Get-Process -Name $Script:ToolName, "$($Script:ToolName)-panel" -ErrorAction SilentlyContinue)) {
         $source = Resolve-ServerSource (Get-StateValue $state 'repo' $DefaultRepo) (Get-StateValue $state 'channel' 'release') 5
         if ($source.Id -and $source.Id -ne (Get-StateValue $state 'installedId')) {
             [void](Invoke-Setup @('-UpdateOnly', '-PauseOnError'))
@@ -84,6 +87,14 @@ try {
 
     $claude = Find-Tool 'claude'
     $workspace = Get-StateValue $state 'workspace'
+
+    # Control panel (server 2.4 and later): it starts Claude Code and shows its status.
+    $panel = Join-Path (Split-Path -Parent (Get-StateValue $state 'server')) "$($Script:ToolName)-panel.exe"
+    if (-not $NoPanel -and (Test-File $panel)) {
+        Start-Process -FilePath $panel -ArgumentList @('--workspace', (ConvertTo-Arg $workspace))
+        exit 0
+    }
+
     $terminal = Get-Command 'wt.exe' -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($terminal) {
         Start-Process -FilePath $terminal.Source -ArgumentList @(
