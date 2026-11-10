@@ -32,27 +32,26 @@ def test_plate_with_hole_volume_verification():
     assert "New part created" in res_part
 
     try:
-        # 2. Select top plane and create 100x50 centered rectangle sketch
+        # 2. Select the top plane (XZ) and draw a 100x50 rectangle centred on the origin
         asyncio.run(server.select_plane("top"))
         asyncio.run(server.start_sketch())
-        asyncio.run(server.sketch_rectangle(0.0, 0.0, 100.0, 50.0, centered=True))
+        asyncio.run(server.sketch_rectangle(width_mm=100.0, height_mm=50.0))
 
-        # 3. Extrude 10 mm
+        # 3. Extrude 10 mm (along +Y: the top face of the plate is at y = 10)
         res_ext = asyncio.run(server.extrude(depth_mm=10.0))
         assert "Extrusion" in res_ext
 
         # 4. Model check after extrude
         res_check1 = asyncio.run(server.check_model())
-        assert "No rebuild errors" in res_check1
+        assert "Model is healthy" in res_check1
 
-        # 5. Through hole Ø10 mm at the center
-        asyncio.run(server.select_face_at_point([0.0, 0.0, 10.0]))
-        res_hole = asyncio.run(server.hole(centers=[[0.0, 0.0, 10.0]], diameter_mm=10.0, through_all=True))
+        # 5. Through hole Ø10 mm at the centre of the top face
+        res_hole = asyncio.run(server.hole(centers=[[0.0, 10.0, 0.0]], diameter_mm=10.0, through_all=True))
         assert "hole" in res_hole
 
         # 6. Model check after hole
         res_check2 = asyncio.run(server.check_model())
-        assert "No rebuild errors" in res_check2
+        assert "Model is healthy" in res_check2
 
         # 7. Mass properties: volume of 100x50x10 plate with Ø10 hole:
         # 100 * 50 * 10 - pi * (5^2) * 10 = 50000 - 785.398 = 49214.60 mm^3
@@ -67,8 +66,7 @@ def test_plate_with_hole_volume_verification():
                 sw = server.get_sw()
                 doc = sw.ActiveDoc
                 if doc:
-                    title = doc.GetTitle()
-                    sw.CloseDoc(title)
+                    sw.CloseDoc(server.call(doc, "GetTitle"))
             asyncio.run(server.com_tool(close_doc))
         except Exception:
             pass

@@ -30,6 +30,35 @@ def test_doctor_windows_simulation(capsys, monkeypatch):
     assert ret in (0, 1)
 
 
+def test_doctor_reads_the_default_template_preferences(capsys, monkeypatch):
+    import types
+
+    asked = []
+
+    class FakeSW:
+        RevisionNumber = "34.2.1"
+        def GetUserPreferenceStringValue(self, pref):
+            asked.append(pref)
+            return f"C:/templates/{pref}.dot"
+
+    client = types.ModuleType("win32com.client")
+    client.GetActiveObject = lambda progid: FakeSW()
+    package = types.ModuleType("win32com")
+    package.client = client
+    monkeypatch.setitem(sys.modules, "win32com", package)
+    monkeypatch.setitem(sys.modules, "win32com.client", client)
+    monkeypatch.setattr(cli.sys, "platform", "win32")
+    monkeypatch.setattr(cli, "check_privileges", lambda: False)
+    monkeypatch.setattr(cli.os.path, "isfile", lambda p: True)
+
+    assert cli.run_doctor() == 0
+    # swDefaultTemplatePart / Assembly / Drawing, the same values used by the server
+    assert asked == [server.SW_DEFAULT_TEMPLATE_PART, server.SW_DEFAULT_TEMPLATE_ASSEMBLY,
+                     server.SW_DEFAULT_TEMPLATE_DRAWING]
+    out = capsys.readouterr().out
+    assert "[OK] Part Template: Configured (C:/templates/8.dot)" in out
+
+
 def test_install_client_config(tmp_path, capsys):
     config_file = str(tmp_path / "claude_desktop_config.json")
 

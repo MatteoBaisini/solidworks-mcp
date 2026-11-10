@@ -184,10 +184,22 @@ def test_sketch_coordinates_follow_the_sketch_transform(monkeypatch):
     assert server.sketch_to_model(None, 5, 20) == pytest.approx([5, 10, -20])
 
 
+class FakeFaults:
+    """IFaultEntity: Body2.Check3 returns one even for a healthy body, with Count = 0."""
+    def __init__(self, count):
+        self.Count = count
+
+
+class FakeBody:
+    def __init__(self, name="Body1", faults=0):
+        self.Name = name
+        self.Check3 = FakeFaults(faults)
+
+
 def test_check_model_reports_healthy_model(monkeypatch):
     class FakeDoc:
         def GetBodies2(self, kind, visible):
-            return [object()]
+            return [FakeBody()]
     monkeypatch.setattr(server, "active_doc", lambda *args: FakeDoc())
     monkeypatch.setattr(server, "rebuild", lambda doc: None)
     monkeypatch.setattr(server, "iter_features", lambda doc: [])
@@ -203,13 +215,14 @@ def test_check_model_detects_errors_and_multiple_bodies(monkeypatch):
             return 2
     class FakeDoc:
         def GetBodies2(self, kind, visible):
-            return [object(), object()]
+            return [FakeBody("Body1"), FakeBody("Body2", faults=2)]
     monkeypatch.setattr(server, "active_doc", lambda *args: FakeDoc())
     monkeypatch.setattr(server, "rebuild", lambda doc: None)
     monkeypatch.setattr(server, "iter_features", lambda doc: [FakeFeat()])
     result = asyncio.run(server.check_model())
     assert "ERRORS" in result and "Boss-Extrude1" in result
     assert "MULTIPLE BODIES" in result
+    assert "GEOMETRY FAULTS" in result and "Body2 (2 fault(s))" in result and "Body1 (" not in result
 
 
 def test_structured_output_tools_declare_output_schemas():
@@ -394,17 +407,37 @@ def test_insert_component(tmp_path, monkeypatch):
     part_file = tmp_path / "part1.SLDPRT"
     part_file.write_text("fake")
 
+    class FakeTransform:
+        ArrayData = None
+
     class FakeComp:
-        def Name(self): return "part1-1"
+        Name2 = "part1-1"
+        Transform2 = FakeTransform()
 
     class FakeDoc:
+        def GetTitle(self): return "Assem1"
+        def EditRebuild3(self): return True
         def AddComponent5(self, path, opt, cfg, silent, ds, x, y, z):
+            assert (x, y, z) == (0.010, 0.020, 0.030)
             return FakeComp()
 
+    opened = []
+
+    class FakeSW:
+        def GetOpenDocumentByName(self, path): return None   # not loaded yet: must be opened first
+        def OpenDoc6(self, path, doc_type, options, cfg, errors, warnings):
+            assert doc_type == server.SW_DOC_PART and options == server.SW_OPEN_SILENT
+            opened.append(path)
+            return FakeDoc()
+        def ActivateDoc3(self, title, silent, option, errors): assert title == "Assem1"
+        def CloseDoc(self, title): opened.pop()
+
+    monkeypatch.setattr(server, "get_sw", lambda: FakeSW())
     monkeypatch.setattr(server, "active_doc", lambda *args: FakeDoc())
-    monkeypatch.setattr(server, "rebuild", lambda doc: None)
     res = asyncio.run(server.insert_component(str(part_file), 10.0, 20.0, 30.0))
-    assert "Component 'part1-1' inserted into assembly" in res
+    assert "Component 'part1-1' inserted with its origin at (10, 20, 30) mm" in res
+    assert opened == []   # the part window opened for the insertion was closed again
+    assert FakeComp.Transform2.ArrayData is not None   # the origin was moved to the requested point
 
 
 def test_add_mate(monkeypatch):
@@ -420,13 +453,14 @@ def test_add_mate(monkeypatch):
         def __init__(self):
             self.Extension = FakeExtension()
         def ClearSelection2(self, all): return True
+        def EditRebuild3(self): return True
         def AddMate5(self, *args):
+            args[-1].value = server.SW_MATE_NO_ERROR   # 1 = swAddMateError_NoError, not 0
             return FakeMateFeat()
 
     monkeypatch.setattr(server, "active_doc", lambda *args: FakeDoc())
-    monkeypatch.setattr(server, "rebuild", lambda doc: None)
     res = asyncio.run(server.add_mate("coincident", entity1_name="Face1@Part1-1", entity2_name="Face1@Part2-1"))
-    assert "Mate 'Coincident1' (coincident) added successfully" in res
+    assert "Mate 'Coincident1' (coincident) added" in res
 
 
 def test_check_interference(monkeypatch):
@@ -458,11 +492,14 @@ def test_new_drawing(monkeypatch):
     class FakePartDoc:
         def GetType(self): return server.SW_DOC_PART
         def GetPathName(self): return "C:/projects/part1.SLDPRT"
+        def GetModelViewNames(self): return ("*Anteriore", "*Isometrico", "*Trimetrico")
 
     class FakeDrawDoc:
         def GetTitle(self): return "Drawing1"
         def Create3rdAngleViews2(self, path): return True
-        def CreateDrawViewFromModelView3(self, path, name, x, y, z): return None
+        def CreateDrawViewFromModelView3(self, path, name, x, y, z):
+            assert name == "*Isometrico"   # the localised name reported by the model
+            return object()
 
     class FakeSW:
         ActiveDoc = FakePartDoc()
@@ -473,7 +510,7 @@ def test_new_drawing(monkeypatch):
     monkeypatch.setattr(server.os.path, "isfile", lambda p: True)
     monkeypatch.setattr(server, "rebuild", lambda doc: None)
     res = asyncio.run(server.new_drawing())
-    assert "New drawing 'Drawing1' created from 'part1.SLDPRT'" in res
+    assert "New drawing 'Drawing1' created from 'part1.SLDPRT' with front, top, right and isometric views." in res
 
 
 def test_insert_model_dimensions(monkeypatch):
@@ -550,17 +587,33 @@ def test_sheet_metal(monkeypatch, tmp_path):
         def Name(self): return self._name
         def GetErrorCode2(self, *args): return 0
 
+    calls = {}
+
     class FakeFeatureManager:
         def InsertSheetMetalBaseFlange2(self, *args):
+            calls["base"] = args
+            assert fake_doc.SketchManager.ActiveSketch is not None, "the sketch must be open"
             return FakeFeature("BaseFlange1")
-        def InsertSheetMetalEdgeFlange2(self, *args):
+        def InsertSheetMetalEdgeFlange2(self, edges, sketches, *args):
+            calls["edge"] = (edges, sketches) + args
             return FakeFeature("EdgeFlange1")
 
+    class FakeVertex:
+        def __init__(self, p): self._p = p
+        def GetPoint(self): return self._p
+
     class FakeEdge:
-        pass
+        def GetStartVertex(self): return FakeVertex((0.0, 0.0, 0.0))
+        def GetEndVertex(self): return FakeVertex((0.0, 0.0, 0.04))
 
     class FakeSketch:
-        pass
+        def __init__(self, name): self.Name = name
+        def Select2(self, append, mark): return True
+
+    class FakeSketchManager:
+        def __init__(self): self.ActiveSketch = None; self.AddToDB = False; self.rect = None
+        def CreateCornerRectangle(self, *args): self.rect = args; return [1, 2, 3, 4]
+        def InsertSketch(self, update): self.ActiveSketch = None
 
     class FakeSelMgr:
         def GetSelectedObjectCount2(self, mark): return 1
@@ -570,32 +623,42 @@ def test_sheet_metal(monkeypatch, tmp_path):
         def __init__(self):
             self.FeatureManager = FakeFeatureManager()
             self.SelectionManager = FakeSelMgr()
+            self.SketchManager = FakeSketchManager()
             self._path = str(tmp_path / "sheet_part.SLDPRT")
         def GetType(self): return server.SW_DOC_PART
         def GetPathName(self): return self._path
         def GetTitle(self): return "sheet_part"
         def ClearSelection2(self, all_obj): pass
         def FirstFeature(self): return None
-        def InsertSketchForEdgeFlange(self, edge, angle, rev): return FakeSketch()
-        def InsertSketch2(self, update): pass
+        def EditSketch(self): self.SketchManager.ActiveSketch = self._edit
+        def InsertSketchForEdgeFlange(self, edge, angle, rev):
+            self._edit = FakeSketch("FlangeSketch")
+            return self._edit
         def ExportFlatPatternView(self, filepath, options):
             with open(filepath, "w") as f:
                 f.write("FAKE DXF CONTENT")
             return True
 
     fake_doc = FakePartDoc()
+    fake_doc._edit = FakeSketch("Sketch1")   # the last sketch, reopened by base_flange
     monkeypatch.setattr(server, "active_doc", lambda *args: fake_doc)
-    monkeypatch.setattr(server, "close_sketch_and_select_it", lambda doc: "Sketch1")
+    monkeypatch.setattr(server, "last_sketch_feature", lambda doc: fake_doc._edit)
+    monkeypatch.setattr(server, "model_to_sketch", lambda doc, p: (p[2], p[1], 0.0))
     monkeypatch.setattr(server, "leave_sketch", lambda doc: None)
     monkeypatch.setattr(server, "rebuild", lambda doc: None)
 
-    # 1. base_flange
+    # 1. base_flange reopens the last sketch and passes a COM 'Nothing' for the bend allowance
     res = asyncio.run(server.base_flange(thickness_mm=2.0, depth_mm=50.0, bend_radius_mm=1.5))
     assert "Sheet metal base flange 'BaseFlange1' created from 'Sketch1'" in res
+    assert calls["base"][:4] == (0.002, False, 0.0015, 0.05) and calls["base"][9] is server.NOTHING
 
-    # 2. edge_flange
+    # 2. edge_flange draws the profile (edge length x flange length) and passes VARIANT arrays
     res = asyncio.run(server.edge_flange(length_mm=25.0, angle_deg=90.0))
     assert "Edge flange 'EdgeFlange1' created" in res
+    assert fake_doc.SketchManager.rect == (0.0, 0.0, 0, 0.04, 0.025, 0)
+    edges, sketches, options = calls["edge"][:3]
+    assert isinstance(edges, server.VARIANT) and isinstance(sketches, server.VARIANT)
+    assert options == 1 and calls["edge"][-1] is server.NOTHING
 
     # 3. export_flat_pattern
     out_dxf = str(tmp_path / "custom_flat.dxf")

@@ -181,6 +181,8 @@ SW_DIM_ANGULAR, SW_DIM_INTEGER = 1, 2   # swDimensionParamType_e
 SW_CUSTOM_INFO_TEXT = 30
 SW_CUSTOM_PROPERTY_REPLACE = 2
 SW_REF_PLANE_DISTANCE, SW_REF_PLANE_FLIP = 8, 256
+SW_OPEN_SILENT = 1                # swOpenDocOptions_Silent
+SW_MATE_NO_ERROR = 1              # swAddMateError_NoError
 DOC_TYPE_NAMES = {SW_DOC_PART: "Part", SW_DOC_ASSEMBLY: "Assembly", SW_DOC_DRAWING: "Drawing"}
 
 MATE_TYPES = {
@@ -519,17 +521,46 @@ PICK_TOLERANCE_MM = 0.05
 BODY_LISTS = {"FACE": "GetFaces", "EDGE": "GetEdges", "VERTEX": "GetVertices"}
 
 
+def _searchable_bodies(doc: Any) -> list[tuple[Any, Callable[[list[float]], list[float]]]]:
+    """Solid bodies to search, each with a function mapping a model point into the body's own space.
+
+    In a part the bodies live in model space. In an assembly each component's body is in the
+    component's space, so the query point is moved there with the inverse of its transform
+    (row-vector convention: assembly = local * R * scale + T).
+    """
+    if call(doc, "GetType") != SW_DOC_ASSEMBLY:
+        return [(body, lambda p: p) for body in doc.GetBodies2(0, True) or ()]   # swSolidBody, visible only
+    found = []
+    for comp in call(doc, "GetComponents", False) or ():   # every component, sub-assemblies included
+        try:
+            body = call(comp, "GetBody")
+            if body is None:
+                continue
+            a = list(call(call(comp, "Transform2"), "ArrayData"))
+        except Exception:
+            continue
+        rot, t, s = [a[0:3], a[3:6], a[6:9]], a[9:12], a[12] or 1.0
+
+        def to_local(p: list[float], rot=rot, t=t, s=s) -> list[float]:
+            v = [(p[j] - t[j]) / s for j in range(3)]
+            return [sum(v[j] * rot[i][j] for j in range(3)) for i in range(3)]   # times R transposed
+        found.append((body, to_local))
+    return found
+
+
 def pick(doc: Any, kind: str, point_mm: list[float]) -> Any:
     """The face / edge / vertex of the solid bodies nearest to a point (mm, model coordinates).
 
     Geometric search instead of SelectByID2, which misses entities hidden in the current view.
+    In an assembly the bodies of every component are searched (assembly coordinates).
     """
     p = [v * MM for v in xyz(point_mm)]
     best, best_d = None, math.inf
-    for body in doc.GetBodies2(0, True) or ():   # swSolidBody, visible only
+    for body, to_local in _searchable_bodies(doc):
+        q0 = to_local(p)
         for ent in call(body, BODY_LISTS[kind]) or ():
-            q = call(ent, "GetPoint") if kind == "VERTEX" else ent.GetClosestPointOn(*p)
-            d = math.dist(p, q[:3])
+            q = call(ent, "GetPoint") if kind == "VERTEX" else ent.GetClosestPointOn(*q0)
+            d = math.dist(q0, q[:3])
             if d < best_d:
                 best, best_d = ent, d
     if best is None or best_d > PICK_TOLERANCE_MM * MM:
@@ -549,7 +580,7 @@ def select_entity(doc: Any, entity: Any, append: bool, mark: int) -> None:
 
 def select_at(doc: Any, kind: str, point_mm: list[float], append: bool = True, mark: int = 0) -> None:
     """Selects the face / edge / vertex / sketch entity through a point (mm, model coordinates)."""
-    if kind in BODY_LISTS and call(doc, "GetType") == SW_DOC_PART:
+    if kind in BODY_LISTS and call(doc, "GetType") in (SW_DOC_PART, SW_DOC_ASSEMBLY):
         select_entity(doc, pick(doc, kind, point_mm), append, mark)
         return
     x, y, z = xyz(point_mm)
@@ -752,7 +783,8 @@ async def get_active_document_info() -> str:
             return f"SolidWorks {rev} connected. No document open."
         doc_type = call(doc, "GetType")
         path = call(doc, "GetPathName") or "(not saved yet)"
-        sketch = " - sketch open" if in_sketch(doc) else ""
+        # a drawing sheet always reports an active sketch: only meaningful for parts and assemblies
+        sketch = " - sketch open" if doc_type != SW_DOC_DRAWING and in_sketch(doc) else ""
         return (f"SolidWorks {rev}\nActive document: {call(doc, 'GetTitle')}\n"
                 f"Type: {DOC_TYPE_NAMES.get(doc_type, doc_type)}{sketch}\nPath: {path}")
     return await com_tool(work)
@@ -862,9 +894,10 @@ async def check_model() -> str:
         for b in all_bodies:
             b_name = getattr(b, "Name", "Body")
             try:
-                fault = call(b, "Check3")
-                if fault is not None:
-                    faulty_bodies.append(b_name)
+                faults = call(b, "Check3")   # an IFaultEntity, returned even for healthy bodies
+                count = call(faults, "Count") if faults is not None else 0
+                if count:
+                    faulty_bodies.append(f"{b_name} ({count} fault(s))")
             except Exception:
                 pass
 
@@ -974,7 +1007,8 @@ async def export_document(formats: list[str] | None = None, directory: str = "")
     Existing files with the same name are replaced.
 
     formats: e.g. ["step", "stl"]; omit to use the formats set by the user in the
-      configuration (STEP by default). Supported: step, stp, iges, igs, x_t, stl, 3mf, pdf, png.
+      configuration (STEP by default). Supported: step, stp, iges, igs, x_t, stl, 3mf, pdf, png,
+      dxf, dwg (pdf, dxf and dwg for drawings).
     directory: absolute, or relative to the folder of the document; "{format}" is replaced
       by the format name. Omit to use the configured directory. Created if missing.
     Files are named after the document. The open document is left untouched."""
@@ -1044,27 +1078,43 @@ async def insert_component(
     y_mm: float = 0.0,
     z_mm: float = 0.0,
 ) -> str:
-    """Inserts a part or sub-assembly component into the active assembly at (x, y, z) mm."""
+    """Inserts a part or sub-assembly (a .SLDPRT / .SLDASM file, relative to the projects folder
+    when one is set) into the active assembly, with the component's origin at (x, y, z) mm and
+    no rotation. The file is opened in the background if it is not already open, and its window
+    is closed again afterwards."""
     def work():
+        sw = get_sw()
         doc = active_doc(SW_DOC_ASSEMBLY)
         if not os.path.isabs(path) and CONFIG.projects_directory:
-            resolved = resolve_save_path(path)
+            resolved = os.path.normpath(os.path.join(CONFIG.projects_directory, path))
         else:
             resolved = os.path.abspath(path)
         if not os.path.isfile(resolved):
             raise SWError(f"Component file not found: '{resolved}'.")
+        # AddComponent only works on documents already loaded in SolidWorks
+        opened = None
+        if call(sw, "GetOpenDocumentByName", resolved) is None:
+            doc_type = SW_DOC_ASSEMBLY if resolved.lower().endswith(".sldasm") else SW_DOC_PART
+            errors = VARIANT(pythoncom.VT_BYREF | pythoncom.VT_I4, 0)
+            warnings = VARIANT(pythoncom.VT_BYREF | pythoncom.VT_I4, 0)
+            opened = sw.OpenDoc6(resolved, doc_type, SW_OPEN_SILENT, "", errors, warnings)
+            if opened is None:
+                raise SWError(f"Could not open '{resolved}' (SolidWorks error {getattr(errors, 'value', '?')}).")
+            sw.ActivateDoc3(call(doc, "GetTitle"), False, 0, VARIANT(pythoncom.VT_BYREF | pythoncom.VT_I4, 0))
         try:
             comp = doc.AddComponent5(resolved, 0, "", False, "", x_mm * MM, y_mm * MM, z_mm * MM)
-        except (pywintypes.com_error, AttributeError):
-            try:
-                comp = doc.AddComponent4(resolved, "", x_mm * MM, y_mm * MM, z_mm * MM)
-            except Exception as e:
-                raise SWError(f"Could not insert component '{resolved}': {e}") from e
-        if comp is None:
-            raise SWError(f"SolidWorks failed to insert component from '{resolved}'.")
-        rebuild(doc)
-        comp_name = getattr(comp, "Name2", None) or call(comp, "Name")
-        return f"Component '{comp_name}' inserted into assembly at ({x_mm}, {y_mm}, {z_mm}) mm."
+            if comp is None:
+                raise SWError(f"SolidWorks failed to insert component from '{resolved}'.")
+            # AddComponent places the component by its centre: move its origin to the requested point
+            transform = call(comp, "Transform2")
+            transform.ArrayData = doubles([1, 0, 0, 0, 1, 0, 0, 0, 1, x_mm * MM, y_mm * MM, z_mm * MM, 1, 0, 0, 0])
+            comp.Transform2 = transform
+            call(doc, "EditRebuild3")
+        finally:
+            if opened is not None:
+                sw.CloseDoc(call(opened, "GetTitle"))
+        comp_name = call(comp, "Name2")
+        return f"Component '{comp_name}' inserted with its origin at ({x_mm:g}, {y_mm:g}, {z_mm:g}) mm."
     return await com_tool(work)
 
 
@@ -1085,7 +1135,8 @@ async def add_mate(
 
     Specify entities either by 3D points [x, y, z] mm in assembly coordinates lying on the faces/edges,
     or by entity names (e.g. 'Plane1@Part1-1@Assembly1').
-    Supported mate types: coincident, concentric, parallel, perpendicular, tangent, distance, angle."""
+    Supported mate types: coincident, concentric, parallel, perpendicular, tangent, distance, angle.
+    The components move to satisfy the mate. Replaces the current selection."""
     def work():
         doc = active_doc(SW_DOC_ASSEMBLY)
         doc.ClearSelection2(True)
@@ -1133,13 +1184,13 @@ async def add_mate(
                 doc.ClearSelection2(True)
                 raise SWError(f"Failed to add mate: {e}") from e
 
-        err_code = getattr(mate_error, "value", 0)
+        err_code = getattr(mate_error, "value", SW_MATE_NO_ERROR)
         doc.ClearSelection2(True)
-        if mate_feat is None or err_code != 0:
-            raise SWError(f"Mate '{mate_type}' failed (error code {err_code}). Check that the selected entities are compatible.")
-
-        name = finish_feature(doc, mate_feat, f"Mate '{mate_type}' failed during rebuild.")
-        return f"Mate '{name}' ({mate_type}) added successfully."
+        if mate_feat is None or err_code != SW_MATE_NO_ERROR:
+            raise SWError(f"Mate '{mate_type}' failed (swAddMateError code {err_code}). Check that the "
+                          "selected entities are compatible with this mate type.")
+        call(doc, "EditRebuild3")
+        return f"Mate '{call(mate_feat, 'Name')}' ({mate_type}) added."
     return await com_tool(work)
 
 
@@ -1149,10 +1200,6 @@ async def check_interference() -> str:
     """Checks the active assembly for volumetric interferences (collisions) between components."""
     def work():
         doc = active_doc(SW_DOC_ASSEMBLY)
-        try:
-            doc.ToolsCheckInterference()
-        except Exception:
-            pass
         mgr = getattr(doc, "InterferenceDetectionManager", None)
         if mgr is None:
             raise SWError("Interference detection manager is not available for this assembly.")
@@ -1160,8 +1207,8 @@ async def check_interference() -> str:
             mgr.TreatCoincidenceAsInterference = False
             mgr.TreatSubAssembliesAsComponents = False
             mgr.IncludeMultibodyPartInterferences = True
-            interferences = mgr.GetInterferences() or ()
-            count = mgr.GetInterferenceCount()
+            count = call(mgr, "GetInterferenceCount") or 0
+            interferences = call(mgr, "GetInterferences") or ()
             if count == 0 or not interferences:
                 return "No interferences detected."
             rows = []
@@ -1219,17 +1266,26 @@ async def new_drawing(template_path: str = "") -> str:
         if draw_doc is None:
             raise SWError("SolidWorks did not create the drawing.")
         try:
-            draw_doc.Create3rdAngleViews2(model_path)
-        except Exception:
-            pass
+            standard = bool(draw_doc.Create3rdAngleViews2(model_path))
+        except pywintypes.com_error:
+            standard = False
+        # the standard view names are localised ("*Isometric", "*Isometrico", ...): ask the model
+        names = call(active, "GetModelViewNames") or ()
+        iso_name = next((n for n in names if "iso" in n.lower()), "*Isometric")
         try:
             # Isometric view placed at upper right (approx 0.22m, 0.22m)
-            draw_doc.CreateDrawViewFromModelView3(model_path, "*Isometric", 0.22, 0.22, 0.0)
-        except Exception:
-            pass
+            iso = draw_doc.CreateDrawViewFromModelView3(model_path, iso_name, 0.22, 0.22, 0.0) is not None
+        except pywintypes.com_error:
+            iso = False
         rebuild(draw_doc)
+        if not standard and not iso:
+            raise SWError("The drawing was created but no view could be placed: check that the model is "
+                          "saved and rebuilds (check_model), then retry or delete the empty drawing.")
+        views = (["front, top, right"] if standard else []) + (["isometric"] if iso else [])
+        missing = "" if standard and iso else " (the other views could not be placed)"
         title = call(draw_doc, "GetTitle")
-        return f"New drawing '{title}' created from '{os.path.basename(model_path)}' with standard orthogonal and isometric views."
+        return (f"New drawing '{title}' created from '{os.path.basename(model_path)}' with "
+                f"{' and '.join(views)} views{missing}.")
     return await com_tool(work)
 
 
@@ -1256,12 +1312,12 @@ async def list_configurations() -> str:
     """Lists all configurations in the active part or assembly document, indicating the active one."""
     def work():
         doc = active_doc((SW_DOC_PART, SW_DOC_ASSEMBLY))
-        names = doc.GetConfigurationNames()
+        names = call(doc, "GetConfigurationNames")
         if not names:
             return "No configurations found."
-        active_cfg = doc.GetActiveConfiguration()
-        active_name = active_cfg.Name if active_cfg is not None else ""
-        lines = [f"Configurations for '{doc.GetTitle()}' (active: '{active_name}'):"]
+        active_cfg = call(doc, "GetActiveConfiguration")
+        active_name = call(active_cfg, "Name") if active_cfg is not None else ""
+        lines = [f"Configurations for '{call(doc, 'GetTitle')}' (active: '{active_name}'):"]
         for name in names:
             marker = " [ACTIVE]" if name == active_name else ""
             lines.append(f"- {name}{marker}")
@@ -1278,12 +1334,16 @@ async def activate_configuration(name: str) -> str:
         if not clean_name:
             raise SWError("Configuration name cannot be empty.")
         doc = active_doc((SW_DOC_PART, SW_DOC_ASSEMBLY))
-        names = doc.GetConfigurationNames()
+        names = call(doc, "GetConfigurationNames")
         if not names or clean_name not in names:
             avail = ", ".join(f"'{n}'" for n in (names or []))
             raise SWError(f"Configuration '{clean_name}' not found. Available configurations: {avail or 'none'}.")
-        ok = doc.ShowConfiguration2(clean_name)
-        if not ok:
+        active = call(doc, "GetActiveConfiguration")
+        if active is not None and call(active, "Name") == clean_name:
+            return f"Configuration '{clean_name}' is already active."
+        doc.ShowConfiguration2(clean_name)   # returns False when nothing changed: verify instead
+        active = call(doc, "GetActiveConfiguration")
+        if active is None or call(active, "Name") != clean_name:
             raise SWError(f"Failed to activate configuration '{clean_name}'.")
         rebuild(doc)
         return f"Activated configuration '{clean_name}'."
@@ -1299,7 +1359,7 @@ async def add_configuration(name: str, description: str = "", comment: str = "")
         if not clean_name:
             raise SWError("Configuration name cannot be empty.")
         doc = active_doc((SW_DOC_PART, SW_DOC_ASSEMBLY))
-        names = doc.GetConfigurationNames()
+        names = call(doc, "GetConfigurationNames")
         if names and clean_name in names:
             raise SWError(f"Configuration '{clean_name}' already exists.")
         mgr = doc.ConfigurationManager
@@ -1464,9 +1524,10 @@ async def sketch_line(x1_mm: float, y1_mm: float, x2_mm: float, y2_mm: float,
 @mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False,
                        "idempotentHint": False, "openWorldHint": False})
 async def sketch_polygon(sides: Annotated[int, Field(ge=3, description="Number of sides (>= 3)")],
-                         circumscribed_diameter_mm: Annotated[float, Field(gt=0, description="Inscribed circle diameter in mm")],
+                         circumscribed_diameter_mm: Annotated[float, Field(gt=0, description="Diameter in mm of the circle through the vertices")],
                          center_x_mm: float = 0.0, center_y_mm: float = 0.0, rotation_deg: float = 0.0) -> str:
-    """Draws a regular polygon (e.g. hexagon: sides=6) inscribed in a circle of the given diameter (mm)."""
+    """Draws a regular polygon (e.g. hexagon: sides=6) inscribed in a circle of the given diameter (mm):
+    the vertices lie on the circle (for a hexagon, the diameter is the distance across corners)."""
     def work():
         if sides < 3:
             raise SWError("At least 3 sides are needed.")
@@ -2071,7 +2132,8 @@ async def linear_pattern(features: list[str], direction: Literal["x", "y", "z"],
                          reverse2: bool = False) -> str:
     """Repeats features (names from get_feature_tree) in a row along a model axis: count copies in
     total (original included), spacing_mm apart, towards + (or - with reverse).
-    direction2/count2/spacing2_mm add a second direction for a grid."""
+    direction2/count2/spacing2_mm add a second direction for a grid.
+    The first use of an axis adds a hidden reference axis "Axis X (MCP)" (Y, Z) to the tree."""
     def work():
         if count < 2 or spacing_mm <= 0:
             raise SWError("count must be at least 2 and spacing_mm positive.")
@@ -2107,7 +2169,8 @@ async def circular_pattern(features: list[str],
     """Repeats features (names from get_feature_tree) around an axis: count copies in total
     (original included), spread evenly over angle_deg.
     axis: a model axis through the origin, or "edge" to turn around the circular or straight
-    edge through axis_edge_point ([x, y, z] in mm, e.g. on the rim of a central hole)."""
+    edge through axis_edge_point ([x, y, z] in mm, e.g. on the rim of a central hole).
+    The first use of a model axis adds a hidden reference axis "Axis Z (MCP)" (X, Y) to the tree."""
     def work():
         if count < 2 or not 0 < angle_deg <= 360:
             raise SWError("count must be at least 2 and angle_deg between 0 and 360.")
@@ -2294,34 +2357,35 @@ async def base_flange(thickness_mm: Annotated[float, Field(gt=0, description="Sh
                       depth_mm: Annotated[float, Field(gt=0, description="Extrusion depth in mm for open sketch profiles")] = 100.0,
                       bend_radius_mm: Annotated[float, Field(gt=0, description="Internal bend radius in mm")] = 1.0,
                       reverse_thickness: bool = False) -> str:
-    """Creates a sheet metal base flange / tab from the open or selected sketch."""
+    """Creates a sheet metal base flange from the last sketch (the one open, or the last closed one):
+    an open chain of lines gives a bent sheet extruded depth_mm, a closed profile gives a flat tab.
+    Adds the Sheet-Metal and Flat-Pattern features to the tree. The sheet grows on one side of the
+    sketch lines (the other with reverse_thickness=True)."""
     def work():
         if thickness_mm <= 0 or depth_mm <= 0 or bend_radius_mm <= 0:
             raise SWError("Thickness, depth and bend radius must all be positive.")
         doc = active_doc(SW_DOC_PART)
-        sketch_name = close_sketch_and_select_it(doc)
-        fm = doc.FeatureManager
-        before = last_feature_name(doc)
-        try:
-            feat = fm.InsertSheetMetalBaseFlange2(
-                thickness_mm * MM,
-                reverse_thickness,
-                bend_radius_mm * MM,
-                depth_mm * MM,
-                0.0,
-                False,
-                0, 0, 0,
-                None,
-                True,
-                1, 0.0, 0.0, 0.5,
-                False, False, False, True
-            )
-        except Exception:
-            feat = None
+        # the API wants the sketch open (as when the command is started from the UI)
+        if not in_sketch(doc):
+            sketch = last_sketch_feature(doc)
+            doc.ClearSelection2(True)
+            sketch.Select2(False, 0)
+            doc.EditSketch()
+            if not in_sketch(doc):
+                raise SWError("Could not reopen the last sketch for the base flange.")
+        sketch_name = call(doc.SketchManager.ActiveSketch, "Name")
+        doc.SketchManager.AddToDB = False
+        # arguments as in the SolidWorks API example: blind extrusion, K-factor 0.5, rectangular
+        # relief; PCBA must be a COM 'Nothing', not None (type mismatch)
+        feat = doc.FeatureManager.InsertSheetMetalBaseFlange2(
+            thickness_mm * MM, reverse_thickness, bend_radius_mm * MM, depth_mm * MM, 0.0, False,
+            SW_END_BLIND, SW_END_BLIND, 1, NOTHING, False, 2, 0.0001, 0.0001, 0.5, True, False, True, True)
         if feat is None:
-            feat = new_feature(doc, before, f"Base flange from '{sketch_name}' failed.")
-        name = finish_feature(doc, feat, f"Base flange from '{sketch_name}' failed.")
-        return f"Sheet metal base flange '{name}' created from '{sketch_name}' (thickness {thickness_mm} mm, bend radius {bend_radius_mm} mm)."
+            leave_sketch(doc)
+        name = finish_feature(doc, feat, f"Base flange from '{sketch_name}' failed: the sketch must be "
+                                         "an open chain of lines and arcs, or one closed profile.")
+        return (f"Sheet metal base flange '{name}' created from '{sketch_name}' "
+                f"(thickness {thickness_mm} mm, bend radius {bend_radius_mm} mm).")
     return await com_tool(work)
 
 
@@ -2331,7 +2395,10 @@ async def edge_flange(length_mm: Annotated[float, Field(gt=0, description="Flang
                       angle_deg: Annotated[float, Field(gt=0, lt=180, description="Flange bend angle in degrees (default 90)")] = 90.0,
                       edge_point_mm: list[float] | None = None,
                       radius_mm: Annotated[float, Field(ge=0, description="Bend radius in mm; 0 uses part default")] = 0.0) -> str:
-    """Creates a sheet metal edge flange on the selected or indicated edge."""
+    """Bends a flange of length_mm along a straight edge of a sheet metal part (made with
+    base_flange): edge_point_mm is a point [x, y, z] in mm on that edge, or the edge selected
+    with select_edge_at_point is used. The flange is as wide as the edge; radius_mm = 0 uses the
+    bend radius of the part. Replaces the current selection."""
     def work():
         if length_mm <= 0 or not 0 < angle_deg < 180:
             raise SWError("Flange length must be positive and angle between 0 and 180 degrees.")
@@ -2339,39 +2406,40 @@ async def edge_flange(length_mm: Annotated[float, Field(gt=0, description="Flang
         leave_sketch(doc)
         if edge_point_mm:
             doc.ClearSelection2(True)
-            select_at(doc, "EDGE", edge_point_mm)
+            select_at(doc, "EDGE", edge_point_mm, append=False)
         sel_mgr = doc.SelectionManager
         if sel_mgr.GetSelectedObjectCount2(-1) == 0:
             raise SWError("No edge selected. Select an edge first (select_edge_at_point) or pass edge_point_mm.")
         edge = sel_mgr.GetSelectedObject6(1, -1)
         if edge is None:
             raise SWError("Could not retrieve selected edge.")
-        ang_rad = angle_deg * DEG
-        try:
-            sketch = doc.InsertSketchForEdgeFlange(edge, ang_rad, False)
-        except Exception as e:
-            raise SWError(f"Failed to insert sketch for edge flange on the selected edge: {e}") from e
+        # 1. an empty sketch on the flange plane (sketch X along the edge, Y away from the sheet)
+        sketch = doc.InsertSketchForEdgeFlange(edge, angle_deg * DEG, False)
         if sketch is None:
-            raise SWError("Failed to insert sketch for edge flange on the selected edge.")
-        try:
-            doc.InsertSketch2(True)
-        except Exception:
-            pass
-        use_default_rad = (radius_mm <= 0)
-        options = (1 if use_default_rad else 0) | 2
-        r_val = 0.0 if use_default_rad else radius_mm * MM
-        fm = doc.FeatureManager
-        before = last_feature_name(doc)
-        try:
-            feat = fm.InsertSheetMetalEdgeFlange2(
-                [edge], [sketch], options, ang_rad, r_val,
-                1, length_mm * MM, 0, 0.0, 0.0, 0.0, 0, None
-            )
-        except Exception:
-            feat = None
-        if feat is None:
-            feat = new_feature(doc, before, "Edge flange failed (check edge geometry and angle).")
-        name = finish_feature(doc, feat, "Edge flange failed.")
+            raise SWError("SolidWorks refused that edge for a flange: it must be a straight edge of the "
+                          "sheet metal body.")
+        # 2. draw the flange profile in it: a rectangle with the edge as one side
+        start = [v / MM for v in call(call(edge, "GetStartVertex"), "GetPoint")]
+        end = [v / MM for v in call(call(edge, "GetEndVertex"), "GetPoint")]
+        doc.ClearSelection2(True)
+        sketch.Select2(False, 0)
+        doc.EditSketch()
+        if not in_sketch(doc):
+            raise SWError("Could not open the flange sketch.")
+        (x1, y1, _), (x2, _, _) = model_to_sketch(doc, start), model_to_sketch(doc, end)
+        sm = doc.SketchManager
+        sm.AddToDB = True
+        sm.CreateCornerRectangle(x1 * MM, y1 * MM, 0, x2 * MM, (y1 + length_mm) * MM, 0)
+        sm.AddToDB = False
+        sm.InsertSketch(True)
+        # 3. the flange itself (arrays of COM objects must be VARIANT SAFEARRAYs)
+        edges = VARIANT(pythoncom.VT_ARRAY | pythoncom.VT_DISPATCH, [edge])
+        sketches = VARIANT(pythoncom.VT_ARRAY | pythoncom.VT_DISPATCH, [sketch])
+        options = 1 if radius_mm <= 0 else 0   # swInsertEdgeFlangeUseDefaultRadius
+        feat = doc.FeatureManager.InsertSheetMetalEdgeFlange2(
+            edges, sketches, options, angle_deg * DEG, radius_mm * MM, 0, 0.0, 0, 0.5, 0.0, 0.0, 0, NOTHING)
+        name = finish_feature(doc, feat, "Edge flange failed: the edge must belong to the sheet metal body "
+                                         "and the flange must not collide with the part (try another angle).")
         return f"Edge flange '{name}' created (length {length_mm} mm, angle {angle_deg} deg)."
     return await com_tool(work)
 

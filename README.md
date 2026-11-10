@@ -176,12 +176,16 @@ python -m venv .venv
 .venv\Scripts\pytest
 ```
 
-The tests do not need SolidWorks. For an end-to-end check against a running SolidWorks:
+The tests do not need SolidWorks; `tests/test_integration.py` also runs against SolidWorks when it is open. For an end-to-end check through the MCP protocol:
 
 ```
-.venv\Scripts\python examples\smoke_test.py         # read only
-.venv\Scripts\python examples\smoke_test.py draw    # creates a plate with a hole
+.venv\Scripts\python examples\smoke_test.py             # read only
+.venv\Scripts\python examples\smoke_test.py draw        # creates a plate with a hole
+.venv\Scripts\python examples\smoke_test.py all         # part, configurations, drawing, assembly, sheet metal
+.venv\Scripts\python examples\smoke_test.py assembly    # or any of: part config drawing assembly sheetmetal
 ```
+
+The groups save their files in a temporary folder and close every document they open. The exit code is the number of failed calls.
 
 ## License
 
