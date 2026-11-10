@@ -23,7 +23,7 @@ import sys
 import threading
 import time
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any, Callable
 
 from solidworks_mcp import __version__
@@ -449,7 +449,7 @@ def default_workspace() -> Path:
 
 def hook_command(python: str | None = None) -> str:
     """Command Claude Code runs for every hook event (forward slashes work in cmd and bash)."""
-    exe = Path(python or sys.executable)
+    exe = PureWindowsPath(python or sys.executable)   # Windows paths, also when tested elsewhere
     if exe.name.lower() == "pythonw.exe":
         exe = exe.with_name("python.exe")
     return f'"{exe.as_posix()}" -m {HOOK_MARKER}'
