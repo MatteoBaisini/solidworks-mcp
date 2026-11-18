@@ -37,7 +37,10 @@ solidworks-mcp-server = "solidworks_mcp.server:main"   # so that "uvx solidworks
 solidworks-mcp-panel = "solidworks_mcp.panel:main"     # control panel, no console window
 
 [project.urls]
+Homepage = "https://github.com/MatteoBaisini/solidworks-mcp"
 Repository = "https://github.com/MatteoBaisini/solidworks-mcp"
+Issues = "https://github.com/MatteoBaisini/solidworks-mcp/issues"
+Changelog = "https://github.com/MatteoBaisini/solidworks-mcp/blob/main/CHANGELOG.md"
 
 [tool.hatch.version]
 path = "src/solidworks_mcp/__init__.py"

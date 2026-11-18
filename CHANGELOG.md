@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.4.1] - 2026-11-18
+
+### Added
+- Added `server.json` manifest for the official MCP Registry (`io.github.matteobaisini/solidworks-mcp` -> PyPI `solidworks-mcp-server`).
+- Added `Homepage`, `Issues`, and `Changelog` URLs to `pyproject.toml` for the PyPI project page.
+
 ## [2.4.0] - 2026-11-11
 
 Every tool added in 2.2.0 has now been exercised against a live SolidWorks 2026 session
